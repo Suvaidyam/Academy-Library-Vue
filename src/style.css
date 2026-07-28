@@ -1,0 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Poppins:wght@300;400;500;600;700&family=Raleway:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+/* Bootstrap preserves the original site's exact visual language. Tailwind is
+   available for new Vue components and responsive composition. */
+body {
+  margin: 0;
+  overflow-x: hidden;
+}
+
+#app {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  text-align: left;
+  border: none;
+  min-height: unset;
+  display: block;
+}
+
+/* Font Awesome fallback via Bootstrap Icons is handled via npm */
+.fa {
+  font-family: 'Bootstrap Icons', sans-serif;
+}
+@import "tailwindcss";
