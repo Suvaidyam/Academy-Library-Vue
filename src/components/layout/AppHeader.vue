@@ -7,7 +7,8 @@ import { getAnnouncementList } from '../../services/api'
 const auth = useAuthStore()
 const router = useRouter()
 const mobileNavActive = ref(false)
-const announcements = ref([])
+const announcements   = ref([])
+const openDropdown    = ref(null)
 
 function getInitials(name) {
   if (!name) return '?'
@@ -22,6 +23,13 @@ function toggleMobileNav() {
 
 function closeMobileNav() {
   mobileNavActive.value = false
+  openDropdown.value    = null
+}
+
+function toggleDropdown(name, e) {
+  if (!mobileNavActive.value) return   // desktop: let Bootstrap handle it
+  e.preventDefault()
+  openDropdown.value = openDropdown.value === name ? null : name
 }
 
 function logout() {
@@ -132,10 +140,11 @@ onMounted(async () => {
               <ul>
                 <!-- Home Dropdown -->
                 <li class="nav-item dropdown">
-                  <a href="#" data-bs-toggle="dropdown">
+                  <a href="#" data-bs-toggle="dropdown"
+                     @click="toggleDropdown('home', $event)">
                     Home <i class="bi bi-chevron-down toggle-dropdown"></i>
                   </a>
-                  <ul class="dropdown">
+                  <ul class="dropdown" :class="{ 'mobile-open': openDropdown === 'home' }">
                     <li><RouterLink class="dropdown-item" to="/about" @click="closeMobileNav">About</RouterLink></li>
                     <li><RouterLink class="dropdown-item" to="/our-leaders" @click="closeMobileNav">Our Leaders</RouterLink></li>
                     <li><RouterLink class="dropdown-item" :to="{ path: '/', hash: '#researchPartners' }" @click="closeMobileNav">Our Partners</RouterLink></li>
@@ -147,10 +156,11 @@ onMounted(async () => {
 
                 <!-- Resources Dropdown -->
                 <li class="nav-item dropdown">
-                  <a href="#" data-bs-toggle="dropdown">
+                  <a href="#" data-bs-toggle="dropdown"
+                     @click="toggleDropdown('resources', $event)">
                     Resources <i class="bi bi-chevron-down toggle-dropdown"></i>
                   </a>
-                  <ul class="dropdown">
+                  <ul class="dropdown" :class="{ 'mobile-open': openDropdown === 'resources' }">
                     <li><RouterLink class="dropdown-item" to="/library" @click="closeMobileNav">Library</RouterLink></li>
                     <li><RouterLink class="dropdown-item" to="/research-library" @click="closeMobileNav">Publications</RouterLink></li>
                     <li><RouterLink class="dropdown-item" to="/success-stories" @click="closeMobileNav">Success Stories</RouterLink></li>
@@ -175,6 +185,18 @@ onMounted(async () => {
 .logo-img {
   height: 100px;
 }
+</style>
+
+<!-- Mobile nav dropdown needs global selector since navmenu styles are in global CSS -->
+<style>
+@media (max-width: 1199px) {
+  .navmenu ul li ul.dropdown.mobile-open {
+    display: block !important;
+  }
+}
+</style>
+
+<style scoped>
 @media (max-width: 576px) {
   .logo-img {
     height: 70px;

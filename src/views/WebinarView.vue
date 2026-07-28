@@ -1,7 +1,7 @@
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { toast } from 'vue3-toastify'
-import { getWebinarsByType, registerForWebinar, getCalendarEvents } from '../services/api'
+import { getWebinarsByType, registerForWebinar } from '../services/api'
 
 const API_BASE = 'https://erp-ryss.ap.gov.in'
 
@@ -307,68 +307,6 @@ function getVideoUrl(wb) {
 const hoveredCard = ref(null)
 const videoPopup  = ref({ show: false, title: '', src: '' })
 
-// ── Calendar ──────────────────────────────────────────────────────────────
-const calendarEl      = ref(null)
-const calendarLoading = ref(false)
-let   calendarInstance = null
-
-async function initCalendar() {
-  calendarLoading.value = true
-  try {
-    const res    = await getCalendarEvents()
-    const events = (res?.message?.all_events || []).map(ev => ({
-      title:       ev.title,
-      start:       (ev.start || '').replace(' ', 'T'),
-      url:         ev.url || '',
-      description: ev.description || '',
-    }))
-
-    await nextTick()
-    if (!calendarEl.value || !window.FullCalendar) return
-
-    calendarInstance = new window.FullCalendar.Calendar(calendarEl.value, {
-      initialView: 'dayGridMonth',
-      headerToolbar: {
-        left:   'prev,next today',
-        center: 'title',
-        right:  'dayGridMonth,timeGridWeek,timeGridDay',
-      },
-      events,
-      eventClick(info) {
-        info.jsEvent.preventDefault()
-        if (info.event.url) window.open(info.event.url, '_blank')
-      },
-      eventDidMount(info) {
-        const today     = new Date(); today.setHours(0, 0, 0, 0)
-        const eventDate = new Date(info.event.start); eventDate.setHours(0, 0, 0, 0)
-        if (eventDate < today) {
-          info.el.style.backgroundColor = '#d9534f'
-          info.el.style.color = 'white'
-        } else if (eventDate > today) {
-          info.el.style.backgroundColor = '#5cb85c'
-          info.el.style.color = 'white'
-        } else {
-          info.el.style.backgroundColor = '#0275d8'
-          info.el.style.color = 'white'
-        }
-        if (window.tippy) {
-          window.tippy(info.el, {
-            content:   info.event.title + (info.event.extendedProps.description ? '<br>' + info.event.extendedProps.description : ''),
-            allowHTML: true,
-            theme:     'light',
-            placement: 'top',
-          })
-        }
-      },
-    })
-    calendarInstance.render()
-  } catch (e) {
-    console.error('initCalendar:', e)
-  } finally {
-    calendarLoading.value = false
-  }
-}
-
 function onCardEnter(wb) {
   if (!getVideoUrl(wb)) return
   hoveredCard.value = wb.name
@@ -397,7 +335,6 @@ function seatPct(wb) {
 onMounted(() => {
   fetchUpcoming()
   fetchPast(1)
-  initCalendar()
 })
 </script>
 
@@ -644,32 +581,6 @@ onMounted(() => {
           </nav>
         </div>
 
-      </div>
-    </section>
-
-    <!-- ══ WEBINAR CALENDAR ═════════════════════════════════════════════ -->
-    <section class="py-5" style="background:#fff;">
-      <div class="container">
-        <div class="d-flex align-items-center gap-3 mb-4">
-          <div class="sec-icon"><i class="bi bi-calendar3-fill"></i></div>
-          <div>
-            <h4 class="mb-0 fw-bold" style="color:#1a1a1a;">Webinar Calendar</h4>
-            <p class="mb-0 text-muted" style="font-size:.84rem;">View all upcoming and past webinars at a glance.</p>
-          </div>
-        </div>
-
-        <!-- Legend -->
-        <div class="d-flex gap-3 flex-wrap mb-3" style="font-size:.8rem;">
-          <span class="cal-legend cal-legend--green">Upcoming</span>
-          <span class="cal-legend cal-legend--blue">Today</span>
-          <span class="cal-legend cal-legend--red">Past</span>
-        </div>
-
-        <!-- Loading skeleton -->
-        <div v-if="calendarLoading" class="wb-skeleton" style="height:480px;"></div>
-
-        <!-- Calendar mount point -->
-        <div v-show="!calendarLoading" ref="calendarEl" id="webinar-calendar"></div>
       </div>
     </section>
 
@@ -1141,28 +1052,6 @@ onMounted(() => {
 }
 .vp-btn:hover { color: #fff; background: rgba(255,255,255,.1); }
 .vp-body { height: 203px; } /* 360 × 9/16 = 202.5 */
-
-/* ─── Calendar ───────────────────────────────────────────────────── */
-#webinar-calendar {
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid #e4e4e4;
-  padding: 16px;
-}
-.cal-legend {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 3px 12px; border-radius: 20px;
-  font-weight: 600; font-size: .76rem;
-}
-.cal-legend::before {
-  content: ''; width: 10px; height: 10px; border-radius: 50%;
-}
-.cal-legend--green { background: #e8f5e9; color: #2d6a4f; }
-.cal-legend--green::before { background: #5cb85c; }
-.cal-legend--blue  { background: #e3f2fd; color: #1565c0; }
-.cal-legend--blue::before  { background: #0275d8; }
-.cal-legend--red   { background: #fce8e6; color: #b71c1c; }
-.cal-legend--red::before   { background: #d9534f; }
 
 /* ─── Responsive ─────────────────────────────────────────────────── */
 @media (max-width: 768px) {
