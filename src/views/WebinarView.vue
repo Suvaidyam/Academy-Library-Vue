@@ -288,7 +288,8 @@ function addToCalendar() {
 function buildAutoplayUrl(url) {
   if (!url) return null
   const ytMatch = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/)
-  if (ytMatch) return `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1&rel=0&modestbranding=1`
+  // enablejsapi=1 lets us postMessage seek/speed commands
+  if (ytMatch) return `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1&rel=0&modestbranding=1&enablejsapi=1`
   const vimeoMatch = url.match(/vimeo\.com\/(?:video\/)?(\d+)/)
   if (vimeoMatch) return `https://player.vimeo.com/video/${vimeoMatch[1]}?autoplay=1`
   const driveMatch = url.match(/drive\.google\.com\/(?:file\/d\/|open\?id=)([A-Za-z0-9_-]+)/)
@@ -307,6 +308,68 @@ function getVideoUrl(wb) {
 const hoveredCard = ref(null)
 const videoPopup  = ref({ show: false, title: '', src: '' })
 
+// ── Popup drag state ──────────────────────────────────────────────────────
+const vpEl       = ref(null)
+const vpX        = ref(null)   // null = use CSS default (bottom-right)
+const vpY        = ref(null)
+const vpDragging = ref(false)
+const vpDragOff  = { x: 0, y: 0 }
+
+const vpStyle = computed(() =>
+  vpX.value !== null
+    ? { left: vpX.value + 'px', top: vpY.value + 'px', right: 'auto', bottom: 'auto' }
+    : {}
+)
+
+function vpDragStart(e) {
+  if (!vpEl.value) return
+  vpDragging.value = true
+  const r = vpEl.value.getBoundingClientRect()
+  vpDragOff.x = e.clientX - r.left
+  vpDragOff.y = e.clientY - r.top
+  vpX.value = r.left; vpY.value = r.top
+  document.addEventListener('mousemove', vpDragMove)
+  document.addEventListener('mouseup',   vpDragEnd)
+}
+function vpDragMove(e) {
+  if (!vpDragging.value) return
+  vpX.value = Math.max(0, Math.min(window.innerWidth  - 360, e.clientX - vpDragOff.x))
+  vpY.value = Math.max(0, Math.min(window.innerHeight -  50, e.clientY - vpDragOff.y))
+}
+function vpDragEnd() {
+  vpDragging.value = false
+  document.removeEventListener('mousemove', vpDragMove)
+  document.removeEventListener('mouseup',   vpDragEnd)
+}
+
+// ── Popup controls ────────────────────────────────────────────────────────
+const SPEEDS      = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2]
+const vpSpeed     = ref(1)
+const vpTime      = ref(0)   // local time tracker (seconds)
+let   vpTimer     = null
+
+function vpPostMsg(func, args = []) {
+  vpEl.value?.querySelector('iframe')
+    ?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func, args }), '*')
+}
+
+function vpSeek(delta) {
+  const t = Math.max(0, vpTime.value + delta)
+  vpTime.value = t
+  vpPostMsg('seekTo', [t, true])
+}
+
+function vpSetSpeed(e) {
+  const s = parseFloat(e.target.value)
+  vpSpeed.value = s
+  vpPostMsg('setPlaybackRate', [s])
+}
+
+function vpFullscreen() {
+  const iframe = vpEl.value?.querySelector('iframe')
+  ;(iframe?.requestFullscreen ?? iframe?.webkitRequestFullscreen)?.call(iframe)
+}
+
 function onCardEnter(wb) {
   if (!getVideoUrl(wb)) return
   hoveredCard.value = wb.name
@@ -318,10 +381,17 @@ function onCardLeave(wb) {
 
 function openVideoPopup(title, src) {
   videoPopup.value = { show: true, title, src }
+  vpSpeed.value = 1
+  vpTime.value  = 0
+  vpX.value     = null
+  vpY.value     = null
+  clearInterval(vpTimer)
+  vpTimer = setInterval(() => { vpTime.value++ }, 1000)
 }
 
 function closeVideoPopup() {
   videoPopup.value = { show: false, title: '', src: '' }
+  clearInterval(vpTimer)
 }
 
 // ── Seat fill percentage ──────────────────────────────────────────────────
@@ -517,12 +587,11 @@ onMounted(() => {
                       <i class="bi bi-play-fill" style="margin-left:2px;"></i>
                     </div> -->
                   </div>
-                  <!-- Drive "click to play" hint -->
+                  <!-- Drive play hint — hover only, icon only -->
                   <div v-if="isDriveUrl(wb.webinar_video || wb.video_url || '')"
                     class="drive-play-hint"
                     @click.stop="openVideoPopup(wb.title, getVideoUrl(wb))">
                     <i class="bi bi-play-circle-fill"></i>
-                    <span>Click to play</span>
                   </div>
                   <div v-if="fmtShortDuration(wb.duration)" class="dur-badge">
                     {{ fmtShortDuration(wb.duration) }}
@@ -731,21 +800,40 @@ onMounted(() => {
       </div>
     </Teleport>
 
-    <!-- ══ VIDEO POPUP (floating, Drive videos) ═════════════════════════ -->
+    <!-- ══ VIDEO POPUP (floating, draggable) ════════════════════════════ -->
     <Teleport to="body">
-      <div v-if="videoPopup.show" id="video-popup">
-        <div class="vp-header">
+      <div v-if="videoPopup.show" id="video-popup" ref="vpEl"
+           :style="vpStyle" :class="{ 'vp-is-dragging': vpDragging }">
+
+        <!-- Drag handle header -->
+        <div class="vp-header" @mousedown.prevent="vpDragStart">
           <span class="vp-title">{{ videoPopup.title }}</span>
-          <div class="vp-controls">
-            <button class="vp-btn" title="Close" @click="closeVideoPopup">
-              <i class="bi bi-x-lg"></i>
-            </button>
-          </div>
+          <button class="vp-btn" title="Close" @click="closeVideoPopup">
+            <i class="bi bi-x-lg"></i>
+          </button>
         </div>
+
+        <!-- Video -->
         <div class="vp-body">
-          <iframe :src="videoPopup.src"
-            frameborder="0" allow="autoplay; encrypted-media; fullscreen"
+          <iframe :src="videoPopup.src" frameborder="0"
+            allow="autoplay; encrypted-media; fullscreen"
             allowfullscreen style="width:100%;height:100%;display:block;"></iframe>
+        </div>
+
+        <!-- Controls bar -->
+        <div class="vp-cbar">
+          <button class="vp-ctrl" title="−10 seconds" @click.stop="vpSeek(-10)">
+            <i class="bi bi-skip-backward-fill"></i>&nbsp;10s
+          </button>
+          <select class="vp-speed-sel" :value="vpSpeed" @change="vpSetSpeed" title="Speed">
+            <option v-for="s in SPEEDS" :key="s" :value="s">{{ s }}×</option>
+          </select>
+          <button class="vp-ctrl" title="+10 seconds" @click.stop="vpSeek(10)">
+            10s&nbsp;<i class="bi bi-skip-forward-fill"></i>
+          </button>
+          <button class="vp-ctrl ms-auto" title="Fullscreen" @click.stop="vpFullscreen">
+            <i class="bi bi-fullscreen"></i>
+          </button>
         </div>
       </div>
     </Teleport>
@@ -963,17 +1051,6 @@ onMounted(() => {
   font-size: .7rem; font-weight: 600; padding: 2px 7px; border-radius: 4px;
 }
 
-/* Drive "click to play" hint */
-.drive-play-hint {
-  position: absolute; inset: 0;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 6px;
-  background: rgba(0,0,0,.45); color: #fff;
-  cursor: pointer; transition: background .2s;
-}
-.drive-play-hint i { font-size: 2.2rem; }
-.drive-play-hint span { font-size: .78rem; font-weight: 600; letter-spacing: .5px; }
-.drive-play-hint:hover { background: rgba(0,0,0,.6); }
 
 /* Fullscreen button — shown on card hover */
 .fullscreen-btn {
@@ -1035,23 +1112,62 @@ onMounted(() => {
   position: fixed; bottom: 24px; right: 24px; z-index: 9999;
   width: 360px; background: #1a1a1a; border-radius: 10px;
   box-shadow: 0 8px 32px rgba(0,0,0,.55); overflow: hidden;
+  user-select: none;
 }
+#video-popup.vp-is-dragging { box-shadow: 0 16px 48px rgba(0,0,0,.75); }
+
 .vp-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 12px; background: #111; gap: 8px;
+  cursor: grab;
 }
+.vp-header:active { cursor: grabbing; }
+
 .vp-title {
   font-size: .8rem; color: #ddd; font-weight: 600;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;
+  pointer-events: none;
 }
-.vp-controls { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .vp-btn {
   background: none; border: none; color: #aaa; cursor: pointer;
   padding: 2px 6px; border-radius: 4px; font-size: .85rem; line-height: 1.4;
-  transition: color .15s, background .15s;
+  transition: color .15s, background .15s; flex-shrink: 0;
 }
 .vp-btn:hover { color: #fff; background: rgba(255,255,255,.1); }
-.vp-body { height: 203px; } /* 360 × 9/16 = 202.5 */
+.vp-body { height: 203px; }
+
+/* Controls bar */
+.vp-cbar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px; background: #111; border-top: 1px solid #222;
+}
+.vp-ctrl {
+  background: none; border: none; color: #bbb; cursor: pointer;
+  padding: 3px 7px; border-radius: 4px; font-size: .72rem;
+  display: inline-flex; align-items: center; gap: 2px;
+  transition: color .15s, background .15s; white-space: nowrap;
+}
+.vp-ctrl:hover { color: #fff; background: rgba(255,255,255,.12); }
+.vp-ctrl i { font-size: .78rem; }
+.vp-speed-sel {
+  background: #222; border: 1px solid #444; color: #ddd;
+  border-radius: 4px; font-size: .72rem; padding: 2px 5px;
+  cursor: pointer; outline: none;
+}
+.vp-speed-sel option { background: #222; }
+
+/* Drive play hint — hover only, icon only */
+.drive-play-hint {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.28);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .2s, background .2s;
+}
+.drive-play-hint i { font-size: 2.8rem; color: rgba(255,255,255,.9); }
+.past-card:hover .drive-play-hint { opacity: 1; }
+.drive-play-hint:hover { background: rgba(0,0,0,.48); }
 
 /* ─── Responsive ─────────────────────────────────────────────────── */
 @media (max-width: 768px) {
