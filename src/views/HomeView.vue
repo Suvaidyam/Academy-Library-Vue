@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { getCarouselImages, getNewsList } from '../services/api'
 
@@ -12,12 +12,6 @@ const hasPrevNews = ref(false)
 const hasNextNews = ref(true)
 
 const API_BASE = 'https://erp-ryss.ap.gov.in'
-
-onMounted(async () => {
-  await loadCarousel()
-  await loadNews()
-  setupAcademicsLinks()
-})
 
 async function loadCarousel() {
   try {
@@ -80,6 +74,74 @@ function setupAcademicsLinks() {
 function navigateCourse(type) {
   router.push({ path: '/learning-library', query: { courseCategory: type } })
 }
+
+// ── Research Partners Carousel (seamless infinite) ──────────────────────
+const PARTNER_TOTAL   = 24
+const PARTNER_GAP     = 16
+const partnerViewport = ref(null)
+const partnerIdx      = ref(0)
+const cardW           = ref(0)
+const partnerPP       = ref(4)
+const partnerAnimated = ref(true)   // false = instant jump (no visible snap)
+
+// Display = original 24 + 24 clones → seamless loop
+const partnerItems = Array.from({ length: PARTNER_TOTAL * 2 }, (_, i) => (i % PARTNER_TOTAL) + 1)
+
+function calcPartnerSizes() {
+  if (!partnerViewport.value) return
+  const w  = partnerViewport.value.offsetWidth
+  const pp = w < 600 ? 1 : w < 900 ? 2 : 4
+  partnerPP.value = pp
+  cardW.value     = (w - PARTNER_GAP * (pp - 1)) / pp
+}
+
+const partnerTranslate = computed(() =>
+  `translateX(-${partnerIdx.value * (cardW.value + PARTNER_GAP)}px)`
+)
+
+const TRANSITION_MS = 400
+
+function partnerNext() {
+  partnerIdx.value++
+  // reached cloned zone → after animation, silently reset to real zone
+  if (partnerIdx.value >= PARTNER_TOTAL) {
+    setTimeout(() => {
+      partnerAnimated.value = false
+      partnerIdx.value = 0
+      nextTick(() => { partnerAnimated.value = true })
+    }, TRANSITION_MS)
+  }
+}
+
+function partnerPrev() {
+  partnerIdx.value--
+  if (partnerIdx.value < 0) {
+    setTimeout(() => {
+      partnerAnimated.value = false
+      partnerIdx.value = PARTNER_TOTAL - 1
+      nextTick(() => { partnerAnimated.value = true })
+    }, TRANSITION_MS)
+  }
+}
+
+let autoTimer = null
+function startAuto() { autoTimer = setInterval(partnerNext, 2500) }
+function stopAuto()  { clearInterval(autoTimer) }
+
+onMounted(async () => {
+  await loadCarousel()
+  await loadNews()
+  setupAcademicsLinks()
+  await nextTick()
+  calcPartnerSizes()
+  window.addEventListener('resize', calcPartnerSizes)
+  startAuto()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', calcPartnerSizes)
+  stopAuto()
+})
 </script>
 
 <template>
@@ -121,7 +183,7 @@ function navigateCourse(type) {
         <img
           :src="getImageUrl(img.image || img.img || img)"
           class="d-block w-100"
-          style="height: 770px; object-fit: fill;"
+          style="height: 770px; object-fit: cover;"
           :alt="img.title || 'Hero Image'"
         />
         <div v-if="img.title" class="carousel-caption d-none d-md-block">
@@ -131,17 +193,16 @@ function navigateCourse(type) {
       </div>
     </div>
 
-    <button class="carousel-control-prev " type="button" data-bs-target="#hero-carousel" data-bs-slide="prev">
+    <button class="carousel-control-prev " type="button" data-bs-target="#hero-carousel" data-bs-slide="prev" style="left: -90px;">
       <i class='fas fa-angle-left'  style="font-size:36px; color:white;"></i>
 
       <span class="visually-hidden">Previous</span>
     </button>
-    <button class="carousel-control-next" type="button" data-bs-target="#hero-carousel" data-bs-slide="next">
+    <button class="carousel-control-next" type="button" data-bs-target="#hero-carousel" data-bs-slide="next" style="right: -100px;">
       <i class="fas fa-angle-right" style="font-size:36px; color:white;"></i>
       <span class="visually-hidden">Next</span>
     </button>
   </div>
-
   <main class="main">
     <!-- About Section -->
     <section id="about" class="section about">
@@ -326,17 +387,39 @@ function navigateCourse(type) {
     <!-- Research Partners Section -->
     <section id="researchPartners" class="section py-5">
       <div class="container">
-        <div class="container section-title" data-aos="fade-up">
+        <div class="section-title" data-aos="fade-up">
           <h2>Our Research Partners</h2>
         </div>
-        <div class="row justify-content-center align-items-center gy-4">
-          <div v-for="n in 6" :key="n" class="col-4 col-md-2 text-center">
-            <img
-              :src="`/img/clients/Research-Learning/research-learning_${n}.png`"
-              class="img-fluid"
-              :alt="`Partner ${n}`"
-              style="max-height:80px; object-fit:contain; filter:grayscale(30%);"
-            />
+
+        <!-- Carousel controls row -->
+        <div class="d-flex justify-content-end gap-2 mb-3">
+          <button class="partner-arrow"  @click="partnerPrev">
+            <i class="bi bi-chevron-left"></i>
+          </button>
+          <button class="partner-arrow"  @click="partnerNext">
+            <i class="bi bi-chevron-right"></i>
+          </button>
+        </div>
+
+        <!-- Viewport -->
+        <div class="partner-viewport" ref="partnerViewport"
+             @mouseenter="stopAuto" @mouseleave="startAuto">
+          <div class="partner-track"
+               :style="{
+                 transform: partnerTranslate,
+                 gap: PARTNER_GAP + 'px',
+                 transition: partnerAnimated ? 'transform 0.4s ease' : 'none'
+               }">
+            <div
+              v-for="(n, i) in partnerItems" :key="i"
+              class="partner-card"
+              :style="{ width: cardW + 'px' }">
+              <img
+                :src="`/img/clients/Research-Learning/research-learning_${n}.png`"
+                :alt="`Partner ${n}`"
+                class="partner-img"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -348,6 +431,55 @@ function navigateCourse(type) {
 #hero-carousel {
   margin-top: 92px;
 }
+
+/* ── Research Partners Carousel ── */
+.partner-viewport {
+  overflow: hidden;
+  width: 100%;
+}
+.partner-track {
+  display: flex;
+  flex-shrink: 0;
+  /* transition controlled inline via :style binding */
+}
+.partner-card {
+  flex-shrink: 0;
+  border: 1px solid #dee2e6;
+  border-radius: 10px;
+  padding: 20px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  min-height: 120px;
+}
+.partner-img {
+  max-height: 110px;
+  max-width: 100%;
+  object-fit: contain;
+}
+.partner-arrow {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1.5px solid #adb5bd;
+  background: #fff;
+  color: #555;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .9rem;
+  cursor: pointer;
+  transition: border-color .2s, color .2s;
+  padding: 0;
+  line-height: 1;
+}
+.partner-arrow:not(:disabled):hover {
+  border-color: #495057;
+  color: #222;
+}
+
 .grade-2 {
   color: #1e4356;
   font-weight: 700;
