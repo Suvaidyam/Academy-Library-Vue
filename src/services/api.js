@@ -119,3 +119,7 @@ export async function getCalendarEvents() {
 export async function getRTIData(page = 1, rowPerPage = 10) {
   return request('rti-data', { page, rowPerPage })
 }
+
+export async function getLearningResources(params = {}) {
+  return request('get_learning_resource_data', params)
+}
