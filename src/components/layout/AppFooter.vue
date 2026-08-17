@@ -50,7 +50,7 @@
           </ul>
           <h4 class="pt-3 pb-0">Quick Links</h4>
           <ul>
-            <li><i class="bi bi-chevron-right"></i><a href="#">RTI</a></li>
+            <li><i class="bi bi-chevron-right"></i><RouterLink to="/rti">RTI</RouterLink></li>
             <li><i class="bi bi-chevron-right"></i><RouterLink to="/webinar">Webinar</RouterLink></li>
           </ul>
         </div>

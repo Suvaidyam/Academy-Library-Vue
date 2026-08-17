@@ -577,7 +577,7 @@ onMounted(() => {
                 <template v-else>
                   <img v-if="resolveImg(wb.webinar_img)"
                     :src="resolveImg(wb.webinar_img)" :alt="wb.title"
-                    style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />
+                    style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;" />
                   <div v-else class="thumb-bg" :style="{ background: thumbGradient(wb.name) }">
                     <i class="bi bi-camera-video-fill"></i>
                   </div>
@@ -1021,8 +1021,13 @@ onMounted(() => {
   position: relative; width: 100%;
   height: 0; padding-top: 56.25%;
   overflow: hidden;
+  background: linear-gradient(135deg, #1a2e1f 0%, #0f1f14 100%);
 }
-.past-thumb img,
+.past-thumb img {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  object-fit: contain; display: block; border: 0;
+}
 .past-thumb .thumb-bg,
 .past-thumb iframe {
   position: absolute; top: 0; left: 0;

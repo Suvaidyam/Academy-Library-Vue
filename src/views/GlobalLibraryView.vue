@@ -1,308 +1,263 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import { getKnowledgeArtifacts, getLanguageList } from '../services/api'
+import { onMounted, ref, computed, watch } from 'vue'
+import { getDoctypeList, getEbooks } from '../services/api'
 
 const API_BASE = 'https://erp-ryss.ap.gov.in'
-const PAGE_SIZE = 4
 
-const activeTab = ref('subscribed')
-const languages = ref([])
-const selectedLanguage = ref('')
-const keyword = ref('')
+const activeCategory = ref('ebooks')
 
-const subscribedItems = ref([])
-const subscribedPage = ref(1)
-const subscribedTotal = ref(0)
+function unique(values) { return [...new Set(values.filter(Boolean))] }
+function apiUrl(path) { return !path ? '' : path.startsWith('http') ? path : `${API_BASE}${path}` }
+function imageUrl(path) { return apiUrl(path) || '/img/book-1.jpg' }
 
-const allItems = ref([])
-const allPage = ref(1)
-const allTotal = ref(0)
+function selectCategory(category) {
+  activeCategory.value = category
+  if (category === 'ebooks' && !ebooks.value.length) loadEbooks(1)
+}
 
-const loading = ref(true)
+// ───────────────────────── E-Books ─────────────────────────
 
-onMounted(async () => {
-  await Promise.all([loadLanguages(), loadSubscribed(1), loadAll(1)])
+const ebookFilters = ref({ book_title: '', sub_title: '', type: '', theme: '', book_category: '', book_subcategory: '', author: '', publisher: '', isbn: '', book_keywords: '' })
+const ebooks = ref([])
+const ebookLoading = ref(false)
+const ebookPage = ref(1)
+const ebookTotalPages = ref(1)
+const ebookCategories = ref([])
+const ebookSubcategories = ref([])
+let ebookSearchTimer
+
+async function loadEbookOptions() {
+  try {
+    const result = await getDoctypeList({
+      doctype: 'Knowledge Artifact',
+      fields: JSON.stringify(['book_category', 'book_subcategory']),
+      or_filters: JSON.stringify([{ category: 'E-Book' }]),
+    })
+    const data = result?.message || []
+    ebookCategories.value = unique(data.map(item => item.book_category)).sort()
+    ebookSubcategories.value = unique(data.map(item => item.book_subcategory)).sort()
+  } catch { ebookCategories.value = []; ebookSubcategories.value = [] }
+}
+
+async function loadEbooks(targetPage = 1) {
+  ebookLoading.value = true
+  try {
+    const result = await getEbooks({ page: targetPage, rowPerPage: 3, ...ebookFilters.value })
+    const message = result?.message || {}
+    ebooks.value = message.data || (Array.isArray(message) ? message : [])
+    ebookPage.value = Number(message.page || targetPage)
+    ebookTotalPages.value = Math.max(1, Math.ceil(Number(message.totalRow || ebooks.value.length) / Number(message.rowPerPage || 3)))
+  } catch { ebooks.value = []; ebookPage.value = 1; ebookTotalPages.value = 1 } finally { ebookLoading.value = false }
+}
+
+function clearEbookFilters() {
+  ebookFilters.value = { book_title: '', sub_title: '', type: '', theme: '', book_category: '', book_subcategory: '', author: '', publisher: '', isbn: '', book_keywords: '' }
+  loadEbooks(1)
+}
+
+watch(ebookFilters, () => {
+  if (activeCategory.value !== 'ebooks') return
+  clearTimeout(ebookSearchTimer)
+  ebookSearchTimer = setTimeout(() => loadEbooks(1), 350)
+}, { deep: true })
+
+// ───────────────────────── Journals (static) ─────────────────────────
+
+const allJournals = [
+  {
+    id: 1,
+    title: 'Natural Farming and Climate Resilience: Evidence from Andhra Pradesh',
+    published: 'Published in Agricultural Sustainability Journal',
+    author: 'APCNF Research Division', year: '2026',
+    volume: 'Vol 12, Issue 3', publisher: 'Elsevier',
+    language: 'English', peer: 'Yes', access: 'Subscription', pdf: '#',
+  },
+  {
+    id: 2,
+    title: 'Natural Farming and Climate Resilience: Evidence from Andhra Pradesh',
+    published: 'Published in Agricultural Sustainability Journal',
+    author: 'APCNF Research Division', year: '2025',
+    volume: 'Vol 11, Issue 4', publisher: 'Springer',
+    language: 'English', peer: 'Yes', access: 'Free', pdf: '#',
+  },
+  {
+    id: 3,
+    title: 'Natural Farming and Climate Resilience: Evidence from Andhra Pradesh',
+    published: 'Published in Agricultural Sustainability Journal',
+    author: 'APCNF Research Division', year: '2025',
+    volume: 'Vol 10, Issue 2', publisher: 'Taylor & Francis',
+    language: 'Telugu', peer: 'No', access: 'Subscription', pdf: '#',
+  },
+]
+
+const jrFilters = ref({ keyword: '', journal: '', year: '', volume: '', publisher: '', language: '', access: '' })
+
+function matchText(value, query) {
+  return !query || (value || '').toLowerCase().includes(query.toLowerCase())
+}
+function matchExact(value, query) {
+  return !query || (value || '').toLowerCase() === query.toLowerCase()
+}
+
+const filteredJournals = computed(() => {
+  const f = jrFilters.value
+  return allJournals.filter(j =>
+    matchText(j.title + ' ' + j.published, f.keyword) &&
+    matchText(j.published, f.journal) &&
+    matchExact(j.year, f.year) &&
+    matchText(j.volume, f.volume) &&
+    matchText(j.publisher, f.publisher) &&
+    matchExact(j.language, f.language) &&
+    matchExact(j.access, f.access)
+  )
 })
 
-async function loadLanguages() {
-  try {
-    const data = await getLanguageList()
-    languages.value = data?.message || []
-  } catch {
-    languages.value = []
-  }
+const jrYears = [...new Set(allJournals.map(j => j.year))].sort()
+const jrLanguages = [...new Set(allJournals.map(j => j.language))].sort()
+
+function clearJrFilters() {
+  jrFilters.value = { keyword: '', journal: '', year: '', volume: '', publisher: '', language: '', access: '' }
 }
 
-async function loadSubscribed(p = 1) {
-  loading.value = true
-  try {
-    const params = {
-      page_size: PAGE_SIZE,
-      page: p,
-      category: 'Global Resource',
-      Subscribe: '1',
-    }
-    if (selectedLanguage.value) params.language = selectedLanguage.value
-    if (keyword.value) params.keySearchInput = keyword.value
-    const data = await getKnowledgeArtifacts(params)
-    const msg = data?.message
-    subscribedItems.value = msg?.data || []
-    subscribedTotal.value = msg?.total_count || 0
-    subscribedPage.value = p
-  } catch {
-    subscribedItems.value = []
-  } finally {
-    loading.value = false
-  }
-}
-
-async function loadAll(p = 1) {
-  loading.value = true
-  try {
-    const params = {
-      page_size: PAGE_SIZE,
-      page: p,
-      category: 'Global Resource',
-      source: 'External',
-    }
-    if (selectedLanguage.value) params.language = selectedLanguage.value
-    if (keyword.value) params.keySearchInput = keyword.value
-    const data = await getKnowledgeArtifacts(params)
-    const msg = data?.message
-    allItems.value = msg?.data || []
-    allTotal.value = msg?.total_count || 0
-    allPage.value = p
-  } catch {
-    allItems.value = []
-  } finally {
-    loading.value = false
-  }
-}
-
-function switchTab(tab) {
-  activeTab.value = tab
-}
-
-function applyFilter() {
-  if (activeTab.value === 'subscribed') loadSubscribed(1)
-  else loadAll(1)
-}
-
-function clearFilter() {
-  selectedLanguage.value = ''
-  keyword.value = ''
-  activeTab.value = 'subscribed'
-  loadSubscribed(1)
-  loadAll(1)
-}
-
-function getImageUrl(path) {
-  if (!path) return '/img/blog/blog-1.jpg'
-  if (path.startsWith('http')) return path
-  return `${API_BASE}${path}`
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return ''
-  return new Date(dateStr).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
-}
-
-const subscribedTotalPages = () => Math.max(1, Math.ceil(subscribedTotal.value / PAGE_SIZE))
-const allTotalPages = () => Math.max(1, Math.ceil(allTotal.value / PAGE_SIZE))
+onMounted(async () => {
+  await Promise.all([loadEbookOptions(), loadEbooks(1)])
+})
 </script>
 
 <template>
   <div>
-    <div class="page-title page-global-information dark-background" style="padding: 80px 0;">
-      <div class="container position-relative">
-        <h1>Global Resources</h1>
-      </div>
+    <div class="page-title dark-background">
+      <div class="container position-relative"><h1>Global Resource</h1></div>
     </div>
 
-    <section id="service-details" class="service-details section">
-      <div class="container">
-        <div class="row gy-5">
-          <!-- Sidebar Filters -->
-          <div class="col-lg-3" data-aos="fade-up" data-aos-delay="100">
-            <div class="service-box">
-              <form @submit.prevent="applyFilter">
-                <div class="row mb-3">
-                  <div class="col-sm-12">
-                    <select
-                      class="form-select"
-                      v-model="selectedLanguage"
-                      @change="applyFilter"
-                    >
-                      <option disabled value="">Language</option>
-                      <option v-for="lang in languages" :key="lang.name" :value="lang.name">
-                        {{ lang.language_name || lang.name }}
-                      </option>
-                    </select>
-                  </div>
-                </div>
-                <div class="row mb-3">
-                  <div class="col-sm-12">
-                    <input
-                      class="form-control"
-                      v-model="keyword"
-                      placeholder="Keywords"
-                      @input="applyFilter"
-                    />
-                  </div>
-                </div>
-                <div class="row mb-3">
-                  <div class="services-list">
-                    <button
-                      type="button"
-                      style="width: 100%;"
-                      class="btn btn-outline-secondary"
-                      @click="clearFilter"
-                    >Clear</button>
-                  </div>
-                </div>
-              </form>
-            </div>
+    <div class="container mt-4 global-resource-page">
+      <div class="global-tabs" role="tablist" aria-label="Global resource sections">
+        <button :class="{ active: activeCategory === 'ebooks' }" type="button" @click="selectCategory('ebooks')">E-Books &amp; Reference Materials</button>
+        <button :class="{ active: activeCategory === 'researchArticles' }" type="button" @click="selectCategory('researchArticles')">Research Articles</button>
+        <button :class="{ active: activeCategory === 'journals' }" type="button" @click="selectCategory('journals')">Journals</button>
+      </div>
 
-            <div class="help-box d-flex flex-column justify-content-center align-items-center">
-              <i class="bi bi-envelope help-icon"></i>
-              <h4>Have a Question?</h4>
-              <p class="d-flex align-items-center mt-1 mb-0">
-                <i class="bi bi-envelope me-2"></i>
-                <a href="mailto:iggaarl@ryss.ap.gov.in">iggaarl@ryss.ap.gov.in</a>
-              </p>
+      <div class="global-content rounded-bottom border bg-white p-3 p-lg-4">
+        <div v-if="activeCategory === 'ebooks'" class="row g-4">
+          <aside class="col-lg-4">
+            <form class="library-filter-card">
+              <h2><i class="bi bi-funnel-fill"></i> Filter E-Books</h2>
+              <input v-for="key in ['book_title', 'sub_title', 'type', 'theme', 'author', 'publisher', 'isbn', 'book_keywords']" :key="key" v-model="ebookFilters[key]" class="form-control mb-2" :placeholder="key.replaceAll('_', ' ')">
+              <select v-model="ebookFilters.book_category" class="form-select mb-2"><option value="">Select Category</option><option v-for="item in ebookCategories" :key="item" :value="item">{{ item }}</option></select>
+              <select v-model="ebookFilters.book_subcategory" class="form-select mb-3"><option value="">Select Sub-Category</option><option v-for="item in ebookSubcategories" :key="item" :value="item">{{ item }}</option></select>
+              <button class="btn btn-outline-secondary w-100" type="button" @click="clearEbookFilters">Clear</button>
+            </form>
+          </aside>
+          <div class="col-lg-8">
+            <h2 class="global-category-title">E-Books &amp; Reference Materials</h2>
+            <p v-if="ebookLoading" class="text-muted">Loading e-books…</p>
+            <div v-else-if="!ebooks.length" class="library-empty"><i class="bi bi-journal-x"></i><h3>No E-Books Found</h3><p>Try adjusting or clearing the filters.</p></div>
+            <div v-else class="d-grid gap-3">
+              <article v-for="ebook in ebooks" :key="ebook.name" class="ebook-card">
+                <a :href="ebook.resource_link || '#'" target="_blank" rel="noopener" class="ebook-thumb-wrap"><img :src="imageUrl(ebook.thumbnail_image)" :alt="ebook.book_title" @error="$event.target.src = '/img/new_ebook_thumnail_img.jpeg'"></a>
+                <div class="ebook-info">
+                  <h3>{{ ebook.book_title || 'Untitled E-Book' }}</h3>
+                  <p v-if="ebook.sub_title">{{ ebook.sub_title }}</p>
+                  <div class="ebook-badges"><span v-for="tag in [ebook.theme, ebook.book_category, ebook.book_subcategory].filter(Boolean)" :key="tag">{{ tag }}</span></div>
+                  <small v-if="ebook.author"><i class="bi bi-person-fill me-1"></i>{{ ebook.author }}</small>
+                  <small v-if="ebook.publisher"><i class="bi bi-bank ms-3 me-1"></i>{{ ebook.publisher }}</small>
+                  <small v-if="ebook.isbn" class="d-block mt-2"><i class="bi bi-upc-scan me-1"></i>ISBN: {{ ebook.isbn }}</small>
+                </div>
+              </article>
             </div>
-          </div>
-
-          <!-- Main Content -->
-          <div class="col-lg-9 ps-lg-5" data-aos="fade-up" data-aos-delay="200">
-            <nav>
-              <div class="nav nav-tabs mb-3" role="tablist">
-                <button
-                  class="nav-link"
-                  :class="{ active: activeTab === 'subscribed', disabled: activeTab === 'subscribed' }"
-                  @click="switchTab('subscribed')"
-                  type="button"
-                >Subscribed</button>
-                <button
-                  class="nav-link"
-                  :class="{ active: activeTab === 'all', disabled: activeTab === 'all' }"
-                  @click="switchTab('all')"
-                  type="button"
-                >All</button>
-              </div>
+            <nav class="d-flex justify-content-end align-items-center gap-3 mt-4">
+              <button class="btn btn-outline-secondary" :disabled="ebookPage <= 1 || ebookLoading" @click="loadEbooks(ebookPage - 1)">Previous</button>
+              <span class="small text-muted">Page {{ ebookPage }} of {{ ebookTotalPages }}</span>
+              <button class="btn btn-outline-secondary" :disabled="ebookPage >= ebookTotalPages || ebookLoading" @click="loadEbooks(ebookPage + 1)">Next</button>
             </nav>
+          </div>
+        </div>
 
-            <div class="tab-content p-3 border border-top-0">
-              <!-- Subscribed Tab -->
-              <div v-show="activeTab === 'subscribed'">
-                <div v-if="loading" class="text-center py-5">
-                  <div class="spinner-border text-primary" role="status"></div>
-                </div>
-                <section v-else id="blog-posts" class="blog-posts">
-                  <div class="row gy-4">
-                    <div v-if="subscribedItems.length === 0" class="col-12 text-center py-4">
-                      <p class="text-muted">No subscribed resources found.</p>
-                    </div>
-                    <div
-                      v-for="item in subscribedItems"
-                      :key="item.name"
-                      class="col-lg-6"
-                    >
-                      <article>
-                        <div class="post-img">
-                          <img :src="getImageUrl(item.thumbnail_image)" :alt="item.title" class="img-fluid blog-img" />
-                        </div>
-                        <p class="post-category">{{ item.category }}</p>
-                        <h2 class="title">
-                          <a :href="item.resource_link || '#'" target="_blank" class="blog-title">{{ item.title }}</a>
-                        </h2>
-                        <div class="d-flex align-items-center">
-                          <img src="/img/blog/blog-author.jpg" alt="" class="img-fluid post-author-img flex-shrink-0" />
-                          <div class="post-meta">
-                            <p class="post-author">{{ item.internalauthor || item.author }}</p>
-                            <p class="post-date"><time>{{ formatDate(item.date_of_creationpublication) }}</time></p>
-                          </div>
-                        </div>
-                        <div v-if="item.resource_link" class="mt-3">
-                          <a :href="item.resource_link" target="_blank" class="resource_link btn btn-sm btn-outline-success">
-                            <i class="bi bi-box-arrow-up-right me-1"></i> View Resource
-                          </a>
-                        </div>
-                      </article>
-                    </div>
-                  </div>
-                </section>
-
-                <div v-if="subscribedTotal > PAGE_SIZE" class="d-flex justify-content-between align-items-center mt-3">
-                  <button
-                    class="btn border-0 bg-transparent"
-                    :disabled="subscribedPage <= 1"
-                    @click="loadSubscribed(subscribedPage - 1)"
-                  ><i class="bi bi-arrow-left-circle fs-1"></i></button>
-                  <button
-                    class="btn border-0 bg-transparent"
-                    :disabled="subscribedPage >= subscribedTotalPages()"
-                    @click="loadSubscribed(subscribedPage + 1)"
-                  ><i class="bi bi-arrow-right-circle fs-1"></i></button>
-                </div>
-              </div>
-
-              <!-- All Tab -->
-              <div v-show="activeTab === 'all'">
-                <div v-if="loading" class="text-center py-5">
-                  <div class="spinner-border text-primary" role="status"></div>
-                </div>
-                <div v-else class="row">
-                  <div v-if="allItems.length === 0" class="col-12 text-center py-4">
-                    <p class="text-muted">No resources found.</p>
-                  </div>
-                  <div
-                    v-for="item in allItems"
-                    :key="item.name"
-                    class="col-lg-6 mb-4"
-                  >
-                    <article>
-                      <div class="post-img">
-                        <img :src="getImageUrl(item.thumbnail_image)" :alt="item.title" class="img-fluid blog-img" />
-                      </div>
-                      <p class="post-category">{{ item.category }}</p>
-                      <h2 class="title">
-                        <a :href="item.resource_link || '#'" target="_blank" class="blog-title">{{ item.title }}</a>
-                      </h2>
-                      <div class="d-flex align-items-center">
-                        <img src="/img/blog/blog-author.jpg" alt="" class="img-fluid post-author-img flex-shrink-0" />
-                        <div class="post-meta">
-                          <p class="post-author">{{ item.internalauthor || item.author }}</p>
-                          <p class="post-date"><time>{{ formatDate(item.date_of_creationpublication) }}</time></p>
-                        </div>
-                      </div>
-                      <p class="small text-muted mt-2">{{ item.a_short_description_about_the_artifact }}</p>
-                      <div v-if="item.resource_link" class="mt-2">
-                        <a :href="item.resource_link" target="_blank" class="resource_link btn btn-sm btn-outline-success">
-                          <i class="bi bi-box-arrow-up-right me-1"></i> View Resource
-                        </a>
-                      </div>
-                    </article>
-                  </div>
-                </div>
-
-                <div v-if="allTotal > PAGE_SIZE" class="d-flex justify-content-between align-items-center mt-3">
-                  <button
-                    class="btn border-0 bg-transparent"
-                    :disabled="allPage <= 1"
-                    @click="loadAll(allPage - 1)"
-                  ><i class="bi bi-arrow-left-circle fs-1"></i></button>
-                  <button
-                    class="btn border-0 bg-transparent"
-                    :disabled="allPage >= allTotalPages()"
-                    @click="loadAll(allPage + 1)"
-                  ><i class="bi bi-arrow-right-circle fs-1"></i></button>
-                </div>
-              </div>
+        <div v-else-if="activeCategory === 'researchArticles'" class="container py-4">
+          <div class="row g-4">
+            <div v-for="item in [{type:'🔬 Research Article', title:'Impact of Natural Farming on Soil Health', author:'APCNF Research Team', summary:'Assessment of soil biological activity and organic carbon under natural farming systems.', tags:['Soil Health','Carbon'],date:'May 2026'}, {type:'📊 Research Report', title:'Climate Resilience through Natural Farming', author:'Sustainable Agriculture Division', summary:'Study on crop performance under drought and extreme weather conditions.',tags:['Climate','Resilience'],date:'March 2026'}, {type:'📈 Case Study', title:'Farmer Income Improvement Analysis', author:'APCNF Monitoring Team', summary:'Comparative study of farm economics before and after natural farming adoption.',tags:['Income','Economics'],date:'January 2026'}]" :key="item.title" class="col-md-4">
+              <article class="research-card">
+                <span class="research-badge">{{ item.type }}</span>
+                <h5>{{ item.title }}</h5>
+                <p class="authors">{{ item.author }}</p>
+                <p class="summary">{{ item.summary }}</p>
+                <div class="keywords"><span v-for="tag in item.tags" :key="tag">{{ tag }}</span></div>
+                <div class="research-footer"><small>{{ item.date }}</small><a href="/img/article.pdf" target="_blank" class="btn btn-success btn-sm">View PDF</a></div>
+              </article>
             </div>
           </div>
         </div>
+
+        <div v-else-if="activeCategory === 'journals'" class="row g-4">
+          <aside class="col-lg-3">
+            <form class="library-filter-card">
+              <h2><i class="bi bi-funnel-fill"></i> Filter Journals</h2>
+              <input v-model="jrFilters.keyword" class="form-control mb-2" placeholder="Keyword(s)">
+              <input v-model="jrFilters.journal" class="form-control mb-2" placeholder="Journal Name">
+              <select v-model="jrFilters.year" class="form-select mb-2"><option value="">Publication Year</option><option v-for="y in jrYears" :key="y" :value="y">{{ y }}</option></select>
+              <input v-model="jrFilters.volume" class="form-control mb-2" placeholder="Volume &amp; Issue">
+              <input v-model="jrFilters.publisher" class="form-control mb-2" placeholder="Publisher">
+              <select v-model="jrFilters.language" class="form-select mb-2"><option value="">Language</option><option v-for="l in jrLanguages" :key="l" :value="l">{{ l }}</option></select>
+              <select v-model="jrFilters.access" class="form-select mb-3"><option value="">Open Access</option><option>Free</option><option>Subscription</option></select>
+              <button class="btn btn-outline-secondary w-100" type="button" @click="clearJrFilters">Clear</button>
+            </form>
+          </aside>
+          <div class="col-lg-9">
+            <h2 class="global-category-title">Journals</h2>
+            <div v-if="!filteredJournals.length" class="library-empty"><i class="bi bi-journal-x"></i><h3>No journals match your filters</h3><p>Try adjusting or clearing the filters above.</p></div>
+            <template v-else>
+              <div v-for="item in filteredJournals" :key="item.id" class="journal-card">
+                <div class="journal-icon">📑</div>
+                <div class="journal-content">
+                  <h5>{{ item.title }}</h5>
+                  <p>{{ item.published }}</p>
+                  <small>Authors: {{ item.author }} | {{ item.year }}</small>
+                  <div class="mt-3">
+                    <a :href="item.pdf" target="_blank" class="btn btn-sm btn-success">View Publication</a>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
       </div>
-    </section>
+    </div>
   </div>
 </template>
+
+<style scoped>
+.global-resource-page { padding-bottom: 3rem; }
+.global-tabs { position: relative; z-index: 5; display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 2px solid #e9ecef; }
+.global-tabs > button { flex: 0 0 auto; padding: 6px 20px; color: #495057; background: transparent; border: 0; border-radius: 8px 8px 0 0; font-weight: 500; transition: background-color .2s ease, color .2s ease; }
+.global-tabs > button:hover { color: #198754; background: #f4f9f2; }
+.global-tabs > button.active { color: #198754; background: #f4f9f2; box-shadow: inset 0 -3px 0 #198754; font-weight: 600; }
+.global-content { position: relative; z-index: 1; border-top: 0 !important; border-radius: 0 !important; }
+
+.library-filter-card { padding: 20px; border: 1px solid #eef0f2; border-radius: 14px; background: #fff; box-shadow: 0 4px 14px rgba(0, 0, 0, .04); }
+.library-filter-card h2 { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; color: #1e4356; font-size: 15px; font-weight: 700; }
+.library-filter-card .form-select, .library-filter-card .form-control { border-color: #dfe3e6; border-radius: 8px; }
+.library-empty { padding: 4rem 1rem; text-align: center; color: #708089; }
+.library-empty i { font-size: 2.5rem; }
+.library-empty h3 { margin-top: .75rem; color: #1e4356; font-size: 1.15rem; }
+
+.ebook-card { display: flex; min-height: 190px; gap: 20px; padding: 20px; border: 1.5px solid #b7dcae; border-radius: 20px; background: #fff; color: inherit; }
+.ebook-card:hover { border-color: #198754; box-shadow: 0 12px 30px rgba(0, 0, 0, .1); }
+.ebook-thumb-wrap { flex: 0 0 140px; height: 190px; overflow: hidden; border-radius: 6px; background: #f4f6f7; box-shadow: 0 4px 14px rgba(0, 0, 0, .15); }
+.ebook-card img { width: 100%; height: 100%; object-fit: contain; }
+.ebook-info { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+.ebook-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: .4rem; }
+.ebook-badges span, .keywords span { padding: 4px 10px; border: 1.5px solid #8fc07f; border-radius: 20px; font-size: .78rem; }
+.global-category-title { margin-bottom: 18px; padding-left: 12px; border-left: 4px solid #198754; color: #1e4356; font-size: 1rem; font-weight: 700; }
+
+.research-card { height: 100%; padding: 1.25rem; border: 1px solid #dce5e9; border-radius: .65rem; background: #fff; box-shadow: 0 3px 12px rgba(23, 59, 73, .05); }
+.research-card h5 { margin: .8rem 0 .4rem; color: #1e4356; font-size: 1.05rem; }
+.research-card p { color: #667982; font-size: .85rem; }
+.research-badge { color: #198754; font-size: .85rem; font-weight: 700; }
+.keywords { display: flex; gap: .4rem; flex-wrap: wrap; }
+.research-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 1.2rem; }
+
+.journal-card { display: flex; gap: 20px; margin-bottom: 1.5rem; padding: 20px; border: 1px solid #dce5e9; border-radius: 10px; background: #fff; box-shadow: 0 3px 12px rgba(23, 59, 73, .05); }
+.journal-icon { font-size: 2.2rem; }
+.journal-content h5 { color: #1e4356; }
+.journal-content p { margin-bottom: .35rem; color: #6c757d; }
+</style>

@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, ref, watch, nextTick, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { getDoctypeList, getEbooks, getKnowledgeArtifacts, getLibraryOptions, getLibrarySessions, getLearningResources } from '../services/api'
+import { getDoctypeList, getKnowledgeArtifacts, getLibraryOptions, getLibrarySessions, getLearningResources } from '../services/api'
 import { useAuthStore } from '../stores/auth'
 
 const API_BASE = 'https://erp-ryss.ap.gov.in'
@@ -19,21 +19,11 @@ const modules = ref([]), topics = ref([]), chapters = ref([]), sessions = ref([]
 const courseFilter = ref({ module: '', topic: '', chapter: '', keyword: '', fileTypes: [] })
 const courseLoading = ref(false)
 const courseView = ref('card')
-const ebookFilters = ref({ book_title: '', sub_title: '', type: '', theme: '', book_category: '', book_subcategory: '', author: '', publisher: '', isbn: '', book_keywords: '' })
-const ebooks = ref([])
-const ebookLoading = ref(false)
-const ebookPage = ref(1)
-const ebookTotalPages = ref(1)
-const ebookCategories = ref([])
-const ebookSubcategories = ref([])
-const globalCategory = ref('ebooks')
-const globalMenuOpen = ref(false)
 const tabMenuOpen = ref(false)
 const showLockToast = ref(false)
 const route = useRoute()
 const auth = useAuthStore()
 let bookSearchTimer
-let ebookSearchTimer
 let lockToastTimer = null
 
 const LR_PAGE_SIZE = 6
@@ -86,7 +76,7 @@ function buildLrAutoplayUrl(url) {
   return ''
 }
 const activeTabLabel = computed(() => {
-  const labels = { books: 'Books', course: 'Course Content', reference: 'Reference Materials', global: 'Global Resource', learning: 'Learning Resource' }
+  const labels = { books: 'Books', course: 'Course Content', reference: 'Reference Materials', learning: 'Learning Resource' }
   return labels[activeTab.value] || 'Select Section'
 })
 const lrTotalPages = computed(() => Math.max(1, Math.ceil(lrTotalRecords.value / LR_PAGE_SIZE)))
@@ -173,11 +163,6 @@ async function selectTab(tab) {
     modules.value = result?.message || []
     loadSessions()
   }
-  if (tab === 'global') {
-    globalMenuOpen.value = true
-    globalCategory.value = 'ebooks'
-    await Promise.all([loadEbookOptions(), loadEbooks()])
-  }
   if (tab === 'learning') fetchLearningResources(1)
 }
 async function loadTopics() {
@@ -201,38 +186,6 @@ async function loadSessions(extra = {}) {
     const result = await getLibrarySessions(params)
     sessions.value = Array.isArray(result?.message) ? result.message : []
   } catch { sessions.value = [] } finally { courseLoading.value = false }
-}
-async function loadEbookOptions() {
-  try {
-    const result = await getDoctypeList({
-      doctype: 'Knowledge Artifact',
-      fields: JSON.stringify(['book_category', 'book_subcategory']),
-      or_filters: JSON.stringify([{ category: 'E-Book' }]),
-    })
-    const data = result?.message || []
-    ebookCategories.value = unique(data.map(item => item.book_category)).sort()
-    ebookSubcategories.value = unique(data.map(item => item.book_subcategory)).sort()
-  } catch { ebookCategories.value = []; ebookSubcategories.value = [] }
-}
-async function loadEbooks(targetPage = 1) {
-  ebookLoading.value = true
-  try {
-    const result = await getEbooks({ page: targetPage, rowPerPage: 3, ...ebookFilters.value })
-    const message = result?.message || {}
-    ebooks.value = message.data || (Array.isArray(message) ? message : [])
-    ebookPage.value = Number(message.page || targetPage)
-    ebookTotalPages.value = Math.max(1, Math.ceil(Number(message.totalRow || ebooks.value.length) / Number(message.rowPerPage || 3)))
-  } catch { ebooks.value = []; ebookPage.value = 1; ebookTotalPages.value = 1 } finally { ebookLoading.value = false }
-}
-function clearEbookFilters() {
-  ebookFilters.value = { book_title: '', sub_title: '', type: '', theme: '', book_category: '', book_subcategory: '', author: '', publisher: '', isbn: '', book_keywords: '' }
-  loadEbooks(1)
-}
-function selectGlobalCategory(category) {
-  globalCategory.value = category
-  activeTab.value = 'global'
-  globalMenuOpen.value = false
-  if (category === 'ebooks') loadEbooks(1)
 }
 async function fetchLearningResources(targetPage = 1) {
   lrLoading.value = true
@@ -357,22 +310,31 @@ watch(() => filters.value.keyword, () => {
   clearTimeout(bookSearchTimer)
   bookSearchTimer = setTimeout(() => loadBooks(1), 350)
 })
-watch(ebookFilters, () => {
-  if (activeTab.value !== 'global' || globalCategory.value !== 'ebooks') return
-  clearTimeout(ebookSearchTimer)
-  ebookSearchTimer = setTimeout(() => loadEbooks(1), 350)
-}, { deep: true })
 function fileIcon(session) { const type = String(session.file_type || session.type || '').toLowerCase(); return type.includes('video') ? 'bi-play-btn' : type.includes('pdf') ? 'bi-file-earmark-pdf' : 'bi-file-earmark-text' }
 
 onMounted(async () => {
   await Promise.all([loadFilters(), loadBooks()])
   if (route.query.tab === 'course') selectTab('course')
-  if (route.query.tab === 'global') selectTab('global')
 })
 </script>
 
 <template>
   <div>
+    <div class="library-ticker-wrap">
+      <div class="library-ticker-track">
+        <span class="library-ticker-item">Knowledge is the seed; reading is the water that helps it grow.<span class="ticker-sep">✦</span></span>
+        <span class="library-ticker-item">Today a reader, tomorrow a leader. — Margaret Fuller<span class="ticker-sep">✦</span></span>
+        <span class="library-ticker-item">The seeds of knowledge, once you planted, yields harvests for generations.<span class="ticker-sep">✦</span></span>
+        <span class="library-ticker-item">Knowledge is the root; wisdom is the fruit it grows.<span class="ticker-sep">✦</span></span>
+        <span class="library-ticker-item">Today a page, tomorrow a path.<span class="ticker-sep">✦</span></span>
+        <span class="library-ticker-item">Knowledge is the seed; reading is the water that helps it grow.<span class="ticker-sep">✦</span></span>
+        <span class="library-ticker-item">Today a reader, tomorrow a leader. — Margaret Fuller<span class="ticker-sep">✦</span></span>
+        <span class="library-ticker-item">The seeds of knowledge, once you planted, yields harvests for generations.<span class="ticker-sep">✦</span></span>
+        <span class="library-ticker-item">Knowledge is the root; wisdom is the fruit it grows.<span class="ticker-sep">✦</span></span>
+        <span class="library-ticker-item">Today a page, tomorrow a path.<span class="ticker-sep">✦</span></span>
+      </div>
+    </div>
+
     <div class="page-title page-library">
       <div class="container position-relative"><h1>Library</h1></div>
     </div>
@@ -391,14 +353,6 @@ onMounted(async () => {
             <button :class="{ active: activeTab === 'books' }" type="button" @click="selectTabAndClose('books')">Books</button>
             <button :class="{ active: activeTab === 'course' }" type="button" @click="selectTabAndClose('course')">Course Content</button>
             <button :class="{ active: activeTab === 'reference' }" type="button" @click="selectTabAndClose('reference')">Reference Materials</button>
-            <div class="global-tab-menu" @mouseenter="globalMenuOpen = true" @mouseleave="globalMenuOpen = false">
-              <button :class="{ active: activeTab === 'global' }" type="button" @click="selectTabAndClose('global')">Global Resource <i class="bi bi-chevron-down small"></i></button>
-              <div v-if="globalMenuOpen" class="global-submenu">
-                <button :class="{ active: globalCategory === 'ebooks' }" @click="selectGlobalCategory('ebooks'); tabMenuOpen = false">E-Books &amp; Reference Materials</button>
-                <button :class="{ active: globalCategory === 'researchArticles' }" @click="selectGlobalCategory('researchArticles'); tabMenuOpen = false">Research Articles</button>
-                <button :class="{ active: globalCategory === 'successJournals' }" @click="selectGlobalCategory('successJournals'); tabMenuOpen = false">Journals</button>
-              </div>
-            </div>
             <button :class="['learning-tab-btn', { active: activeTab === 'learning', 'tab-locked': !auth.isLoggedIn }]" type="button" @click="selectTabAndClose('learning')">
               <i v-if="!auth.isLoggedIn" class="bi bi-lock-fill me-1"></i>Learning Resource
             </button>
@@ -441,9 +395,6 @@ onMounted(async () => {
           </div>
           <div v-else-if="activeTab === 'course'" class="container my-4"><div class="row"><div class="col-lg-9 mb-4"><form class="course-search-container" @submit.prevent="loadSessions()"><div class="search-bar mb-4"><div class="input-group"><input v-model="courseFilter.keyword" class="form-control" placeholder="Tags / keywords for generic / global searches"><button class="btn btn-outline-secondary"><i class="bi bi-search"></i></button></div></div><div v-for="field in [{key:'module', label:'Select a Module', change:loadTopics, items:modules},{key:'topic', label:'Select a Topic', change:loadChapters, items:topics},{key:'chapter', label:'Select a Chapter', change:loadSessions, items:chapters}]" :key="field.key" class="mb-3"><div class="input-group"><select v-model="courseFilter[field.key]" class="form-select" @change="field.change"><option value="">{{ field.label }}</option><option v-for="item in field.items" :key="item.name" :value="item.name">{{ item.name }}</option></select><button type="button" class="btn btn-outline-secondary" @click="field.change"><i class="bi bi-search"></i></button></div></div></form><div class="results-container border rounded p-3 mt-4"><div class="d-flex justify-content-between align-items-center mb-3"><h6 class="mb-0">Session List</h6><div class="view-toggle mb-2"><button class="btn btn-lg" :class="courseView === 'card' ? 'btn-primary' : 'btn-outline-primary'" @click="courseView = 'card'"><i class="bi bi-grid-3x3-gap-fill"></i></button><button class="btn btn-lg ms-2" :class="courseView === 'list' ? 'btn-primary' : 'btn-outline-secondary'" @click="courseView = 'list'"><i class="bi bi-list-ul"></i></button></div></div><p v-if="courseLoading" class="text-muted">loading Session list ............</p><p v-else-if="!sessions.length" class="alert alert-warning text-center mb-0"><i class="bi bi-exclamation-circle-fill me-2"></i>No Sessions are available at the moment. Please check back later!</p><ul v-else :class="['list-unstyled search-results row gy-4 isotope-container', { 'session-list-view': courseView === 'list' }]"><li v-for="session in sessions" :key="session.name" :class="courseView === 'card' ? 'col-lg-4 col-md-6 main1' : 'col-12 main1'"><a :href="apiUrl(session.attachment || session.file) || '#'" target="_blank" class="session-card"><i :class="['bi', fileIcon(session)]"></i><span>{{ session.title || session.session_name || session.name }}</span></a></li></ul></div></div><aside class="col-lg-3"><div class="file-type-container p-3 bg-light rounded"><h6 class="mb-3">File Type</h6><div v-for="type in ['All', 'Docs', 'PDF', 'Video', 'Image', 'PPT']" :key="type" class="mb-2 file-type-option"><div class="d-flex justify-content-between align-items-center"><span>{{ type === 'Docs' ? 'Doc' : type === 'PPT' ? 'Presentation' : type }}</span><div class="form-check"><input v-model="courseFilter.fileTypes" class="form-check-input" type="checkbox" :value="type" @change="loadSessions"></div></div></div></div></aside></div></div>
           <div v-else-if="activeTab === 'reference'" class="container my-4"><div class="row"><div class="col-lg-12 d-flex align-items-center justify-content-center"><div class="featured-section mb-4"><div class="row g-4"><div v-for="(resource, index) in [{type:'PDF'}, {type:'Doc'}, {type:'PDF'}, {type:'PDF'}]" :key="index" class="col-md-4"><article class="resource-card card h-100 shadow-sm"><div class="card-body"><div class="d-flex justify-content-between align-items-start mb-3"><span class="badge bg-success">Crop Management</span><span :class="['resource-type', resource.type.toLowerCase()]">{{ resource.type }}</span></div><h5 class="card-title">Integrated Pest Management Guide</h5><p class="card-text text-muted">Practical guide for identifying and managing major crop pests using eco-friendly methods.</p><div class="resource-meta"><span>🌐 English</span><span>📄 24 Pages</span><span>⭐ Beginner</span></div><hr><div class="d-flex justify-content-between align-items-center"><small class="text-muted">Updated: May 2026</small><a href="#" class="btn btn-success btn-sm">View Resource</a></div></div></article></div></div></div></div></div></div>
-          <div v-else-if="activeTab === 'global' && globalCategory === 'ebooks'" class="row g-4"><aside class="col-lg-4"><form class="library-filter-card"><h2><i class="bi bi-funnel-fill"></i> Filter E-Books</h2><input v-for="key in ['book_title', 'sub_title', 'type', 'theme', 'author', 'publisher', 'isbn', 'book_keywords']" :key="key" v-model="ebookFilters[key]" class="form-control mb-2" :placeholder="key.replaceAll('_', ' ')"><select v-model="ebookFilters.book_category" class="form-select mb-2"><option value="">Select Category</option><option v-for="item in ebookCategories" :key="item" :value="item">{{ item }}</option></select><select v-model="ebookFilters.book_subcategory" class="form-select mb-3"><option value="">Select Sub-Category</option><option v-for="item in ebookSubcategories" :key="item" :value="item">{{ item }}</option></select><button class="btn btn-outline-secondary w-100" type="button" @click="clearEbookFilters">Clear</button></form></aside><div class="col-lg-8"><h2 class="global-category-title">E-Books &amp; Reference Materials</h2><p v-if="ebookLoading" class="text-muted">Loading e-books…</p><div v-else-if="!ebooks.length" class="library-empty"><i class="bi bi-journal-x"></i><h3>No E-Books Found</h3><p>Try adjusting or clearing the filters.</p></div><div v-else class="d-grid gap-3"><article v-for="ebook in ebooks" :key="ebook.name" class="ebook-card"><a :href="ebook.resource_link || '#'" target="_blank" rel="noopener" class="ebook-thumb-wrap"><img :src="imageUrl(ebook.thumbnail_image)" :alt="ebook.book_title" @error="$event.target.src = '/img/new_ebook_thumnail_img.jpeg'"></a><div class="ebook-info"><h3>{{ ebook.book_title || 'Untitled E-Book' }}</h3><p v-if="ebook.sub_title">{{ ebook.sub_title }}</p><div class="ebook-badges"><span v-for="tag in [ebook.theme, ebook.book_category, ebook.book_subcategory].filter(Boolean)" :key="tag">{{ tag }}</span></div><small v-if="ebook.author"><i class="bi bi-person-fill me-1"></i>{{ ebook.author }}</small><small v-if="ebook.publisher"><i class="bi bi-bank ms-3 me-1"></i>{{ ebook.publisher }}</small><small v-if="ebook.isbn" class="d-block mt-2"><i class="bi bi-upc-scan me-1"></i>ISBN: {{ ebook.isbn }}</small></div></article></div><nav class="d-flex justify-content-end align-items-center gap-3 mt-4"><button class="btn btn-outline-secondary" :disabled="ebookPage <= 1 || ebookLoading" @click="loadEbooks(ebookPage - 1)">Previous</button><span class="small text-muted">Page {{ ebookPage }} of {{ ebookTotalPages }}</span><button class="btn btn-outline-secondary" :disabled="ebookPage >= ebookTotalPages || ebookLoading" @click="loadEbooks(ebookPage + 1)">Next</button></nav></div></div>
-          <div v-else-if="activeTab === 'global' && globalCategory === 'researchArticles'" class="container py-4"><div class="row g-4"><div v-for="item in [{type:'🔬 Research Article', title:'Impact of Natural Farming on Soil Health', author:'APCNF Research Team', summary:'Assessment of soil biological activity and organic carbon under natural farming systems.', tags:['Soil Health','Carbon'],date:'May 2026'}, {type:'📊 Research Report', title:'Climate Resilience through Natural Farming', author:'Sustainable Agriculture Division', summary:'Study on crop performance under drought and extreme weather conditions.',tags:['Climate','Resilience'],date:'March 2026'}, {type:'📈 Case Study', title:'Farmer Income Improvement Analysis', author:'APCNF Monitoring Team', summary:'Comparative study of farm economics before and after natural farming adoption.',tags:['Income','Economics'],date:'January 2026'}]" :key="item.title" class="col-md-4"><article class="research-card"><span class="research-badge">{{ item.type }}</span><h5>{{ item.title }}</h5><p class="authors">{{ item.author }}</p><p class="summary">{{ item.summary }}</p><div class="keywords"><span v-for="tag in item.tags" :key="tag">{{ tag }}</span></div><div class="research-footer"><small>{{ item.date }}</small><a href="/img/article.pdf" target="_blank" class="btn btn-success btn-sm">View PDF</a></div></article></div></div></div>
-          <div v-else-if="activeTab === 'global' && globalCategory === 'successJournals'" class="container py-4"><div class="journal-card" v-for="index in 2" :key="index"><div class="journal-icon">📑</div><div class="journal-content"><h5>Natural Farming and Climate Resilience: Evidence from Andhra Pradesh</h5><p>Published in Agricultural Sustainability Journal</p><small>Authors: APCNF Research Division | 2026</small><div class="mt-3"><a href="/img/article.pdf" target="_blank" class="btn btn-sm btn-success">View Publication</a></div></div></div></div>
           <div v-else-if="!auth.isLoggedIn" class="library-empty"><i class="bi bi-lock-fill"></i><h3>Learning Resource requires sign in</h3><p>Please sign in to access Learning Resources.</p><RouterLink to="/login" class="btn btn-success">Sign in</RouterLink></div>
           <div v-else class="py-4">
             <!-- Category selector -->
@@ -527,17 +478,23 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* Scrolling ticker — navbar ke niche, image se pehle */
+.library-ticker-wrap { margin-top: 100px; width: 100%; overflow: hidden; background: linear-gradient(90deg, #0f5132 0%, #198754 50%, #0f5132 100%); padding: 11px 0; }
+.library-ticker-track { display: flex; width: max-content; animation: libraryTickerScroll 45s linear infinite; }
+.library-ticker-track:hover { animation-play-state: paused; }
+.library-ticker-item { white-space: nowrap; color: #e8f5e9; font-size: 14.5px; font-weight: 500; padding: 0 30px; letter-spacing: 0.3px; }
+.library-ticker-item .ticker-sep { color: #a8d5a2; margin: 0 10px; font-weight: 700; }
+@keyframes libraryTickerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+
 .library-page { background: #fff; }
 .library-tabs { position: relative; z-index: 20; display: flex; gap: 0; flex-wrap: wrap; overflow: visible; border-bottom: 2px solid #e9ecef; }
 .tab-mobile-toggle { display: none; }
 .tab-buttons-wrap { display: flex; flex-wrap: wrap; gap: 4px; align-items: stretch; }
-.tab-buttons-wrap > button, .global-tab-menu > button { flex: 0 0 auto; padding: 6px 20px; color: #495057; background: transparent; border: 0; border-radius: 8px 8px 0 0; font-weight: 500; transition: background-color .2s ease, color .2s ease; }
-.tab-buttons-wrap > button:hover, .global-tab-menu > button:hover { color: #198754; background: #f4f9f2; }
-.tab-buttons-wrap > button.active, .global-tab-menu > button.active { color: #198754; background: #f4f9f2; box-shadow: inset 0 -3px 0 #198754; font-weight: 600; }
+.tab-buttons-wrap > button { flex: 0 0 auto; padding: 6px 20px; color: #495057; background: transparent; border: 0; border-radius: 8px 8px 0 0; font-weight: 500; transition: background-color .2s ease, color .2s ease; }
+.tab-buttons-wrap > button:hover { color: #198754; background: #f4f9f2; }
+.tab-buttons-wrap > button.active { color: #198754; background: #f4f9f2; box-shadow: inset 0 -3px 0 #198754; font-weight: 600; }
 .tab-locked { opacity: 0.55; cursor: pointer !important; }
 .tab-locked:hover { opacity: 0.75; }
-.global-tab-menu { position: relative; flex: 0 0 auto; }.global-tab-menu > button { height: 100%; }
-.global-submenu { position: absolute; z-index: 15; top: calc(100% + 4px); left: 0; min-width: 270px; padding: 8px; border: 0; border-radius: 10px; background: #fff; box-shadow: 0 12px 28px rgba(0, 0, 0, .14); }.global-submenu button { display: block; width: 100%; padding: 10px 14px; border: 0; border-radius: 6px; background: transparent; color: #333; text-align: left; font-size: 14px; }.global-submenu button:hover { color: #198754; background: #f4f9f2; }.global-submenu button.active { background: #198754; color: #fff; }
 .library-content { position: relative; z-index: 1; border-top: 0 !important; border-radius: 0 !important; }
 .lr-lock-toast { position: fixed; bottom: 24px; end: 0; right: 16px; z-index: 9999; background: #fff3cd; color: #664d03; border: 1px solid #ffecb5; border-radius: 8px; padding: 12px 18px; font-size: .9rem; font-weight: 500; box-shadow: 0 4px 16px rgba(0,0,0,.15); display: flex; align-items: center; }
 .toast-slide-enter-active, .toast-slide-leave-active { transition: opacity .25s, transform .25s; }
@@ -548,12 +505,8 @@ onMounted(async () => {
   .tab-mobile-toggle { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 11px 16px; background: #f4f9f2; border: 1.5px solid #198754; border-radius: 8px; color: #198754; font-weight: 600; font-size: 14px; cursor: pointer; margin-bottom: 2px; }
   .tab-buttons-wrap { display: none; flex-direction: column; gap: 0; background: #fff; border: 1.5px solid #dee2e6; border-radius: 0 0 8px 8px; overflow: hidden; width: 100%; }
   .tab-buttons-wrap.tab-buttons-open { display: flex; }
-  .tab-buttons-wrap > button, .tab-buttons-wrap .global-tab-menu { width: 100%; text-align: left; border-radius: 0 !important; padding: 12px 16px; border-bottom: 1px solid #f0f0f0; box-shadow: none !important; }
+  .tab-buttons-wrap > button { width: 100%; text-align: left; border-radius: 0 !important; padding: 12px 16px; border-bottom: 1px solid #f0f0f0; box-shadow: none !important; }
   .tab-buttons-wrap > button:last-child { border-bottom: 0; }
-  .tab-buttons-wrap .global-tab-menu { border-bottom: 1px solid #f0f0f0; }
-  .tab-buttons-wrap .global-tab-menu > button { width: 100%; text-align: left; border-radius: 0 !important; padding: 12px 16px; box-shadow: none !important; }
-  .global-submenu { position: static !important; box-shadow: none !important; border-radius: 0; border: 0; padding: 0; background: #f8faf9; min-width: unset; }
-  .global-submenu button { border-radius: 0 !important; border-bottom: 1px solid #eee; padding: 10px 16px 10px 32px !important; }
   .library-content { border-radius: 0 !important; }
 }
 .library-filter-card { padding: 20px; border: 1px solid #eef0f2; border-radius: 14px; background: #fff; box-shadow: 0 4px 14px rgba(0, 0, 0, .04); }
@@ -570,7 +523,7 @@ onMounted(async () => {
 .book-result-meta { display: flex; flex-wrap: wrap; gap: .75rem; color: #73828a; font-size: .8rem; }.book-result-meta i { margin-right: .3rem; }.book-open-icon { color: #198754; }
 .library-empty { padding: 4rem 1rem; text-align: center; color: #708089; }.library-empty i { font-size: 2.5rem; }.library-empty h3 { margin-top: .75rem; color: #1e4356; font-size: 1.15rem; }
 .course-panel { padding: 1.5rem 0; }.course-search { padding: 0; background: transparent; }.session-list { padding: 1rem; border: 1px solid #dee2e6; border-radius: .375rem; background: #fff; }.file-type-container { padding: 1rem; border-radius: .375rem; background: #f8f9fa; }.session-list h3, .file-type-container h3 { margin: 0; color: #212529; font-size: 1rem; font-weight: 500; }.session-card { display: flex; align-items: center; gap: .75rem; min-height: 72px; padding: .9rem; color: #284754; border: 1px solid #dce5e9; border-radius: .375rem; background: #fff; font-weight: 600; }.session-card:hover { border-color: #198754; }.session-card i { color: #198754; font-size: 1.5rem; }.file-type-container label { display: flex; justify-content: space-between; padding: .6rem 0; border-bottom: 1px solid #e7edef; color: #455b65; }.file-type-container h3 { margin-bottom: .65rem; }
-.featured-section { width: 100%; }.resource-card { color: inherit; }.resource-card .card-body { padding: 1rem; }.resource-card .card-title { color: #212529; }.resource-card .resource-type { padding: .15rem .45rem; border-radius: .25rem; background: #e8f5ed; color: #198754; font-size: .72rem; font-weight: 700; }.resource-meta { display: flex; flex-wrap: wrap; gap: .6rem; font-size: .75rem; }.ebook-card { display: flex; min-height: 190px; gap: 20px; padding: 20px; border: 1.5px solid #b7dcae; border-radius: 20px; background: #fff; color: inherit; }.ebook-card:hover { border-color: #198754; box-shadow: 0 12px 30px rgba(0, 0, 0, .1); }.ebook-thumb-wrap { flex: 0 0 140px; height: 190px; overflow: hidden; border-radius: 6px; background: #f4f6f7; box-shadow: 0 4px 14px rgba(0, 0, 0, .15); }.ebook-card img { width: 100%; height: 100%; object-fit: contain; }.ebook-info { display: flex; flex: 1; min-width: 0; flex-direction: column; }.ebook-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: .4rem; }.ebook-badges span, .keywords span { padding: 4px 10px; border: 1.5px solid #8fc07f; border-radius: 20px; font-size: .78rem; }.global-category-title { margin-bottom: 18px; padding-left: 12px; border-left: 4px solid #198754; color: #1e4356; font-size: 1rem; font-weight: 700; }.research-card { height: 100%; padding: 1.25rem; border: 1px solid #dce5e9; border-radius: .65rem; background: #fff; box-shadow: 0 3px 12px rgba(23, 59, 73, .05); }.research-card h5 { margin: .8rem 0 .4rem; color: #1e4356; font-size: 1.05rem; }.research-card p { color: #667982; font-size: .85rem; }.research-badge { color: #198754; font-size: .85rem; font-weight: 700; }.keywords { display: flex; gap: .4rem; flex-wrap: wrap; }.research-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 1.2rem; }.journal-card { display: flex; gap: 20px; margin-bottom: 1.5rem; padding: 20px; border: 1px solid #dce5e9; border-radius: 10px; background: #fff; box-shadow: 0 3px 12px rgba(23, 59, 73, .05); }.journal-icon { font-size: 2.2rem; }.journal-content h5 { color: #1e4356; }.journal-content p { margin-bottom: .35rem; color: #6c757d; }.learning-card { display: block; height: 100%; padding: 1.5rem; border: 1px solid #dce5e9; border-radius: .65rem; background: #fff; text-align: center; }.learning-card:hover { border-color: #198754; box-shadow: 0 5px 15px rgba(25, 135, 84, .1); }.learning-card > div { font-size: 2.6rem; }.learning-resource-card { display: block; padding: 1.5rem; border: 1px solid #dce5e9; border-radius: .65rem; background: #fff; text-align: center; }.learning-resource-card:hover { border-color: #198754; }.learning-resource-card .resource-icon { font-size: 2.6rem; }
+.featured-section { width: 100%; }.resource-card { color: inherit; }.resource-card .card-body { padding: 1rem; }.resource-card .card-title { color: #212529; }.resource-card .resource-type { padding: .15rem .45rem; border-radius: .25rem; background: #e8f5ed; color: #198754; font-size: .72rem; font-weight: 700; }.resource-meta { display: flex; flex-wrap: wrap; gap: .6rem; font-size: .75rem; }.learning-card { display: block; height: 100%; padding: 1.5rem; border: 1px solid #dce5e9; border-radius: .65rem; background: #fff; text-align: center; }.learning-card:hover { border-color: #198754; box-shadow: 0 5px 15px rgba(25, 135, 84, .1); }.learning-card > div { font-size: 2.6rem; }.learning-resource-card { display: block; padding: 1.5rem; border: 1px solid #dce5e9; border-radius: .65rem; background: #fff; text-align: center; }.learning-resource-card:hover { border-color: #198754; }.learning-resource-card .resource-icon { font-size: 2.6rem; }
 @media (max-width: 575.98px) { .book-result-card { grid-template-columns: 78px 1fr; gap: .75rem; }.book-result-card img { width: 78px; height: 100px; }.book-open-icon { display: none; } }
 
 /* ── Learning Resource ─────────────────────────────── */

@@ -123,3 +123,30 @@ export async function getRTIData(page = 1, rowPerPage = 10) {
 export async function getLearningResources(params = {}) {
   return request('get_learning_resource_data', params)
 }
+
+export async function getTodayTopics() {
+  return request('get_today_topics')
+}
+
+export async function getJournalsList(params = {}) {
+  return request('get_journals_list', params)
+}
+
+export async function getSuccessStoriesList(params = {}) {
+  return request('success_stories_list', params)
+}
+
+export async function submitAcademicRegistration(formValues) {
+  const formData = new FormData()
+  Object.entries(formValues).forEach(([key, value]) => {
+    if (value !== null && value !== undefined && value !== '') {
+      formData.append(key, value)
+    }
+  })
+  const res = await fetch(`${BASE_URL}/course_registration`, {
+    method: 'POST',
+    body: formData,
+  })
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return res.json()
+}

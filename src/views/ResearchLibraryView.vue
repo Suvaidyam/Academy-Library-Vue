@@ -1,9 +1,14 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { toast } from 'vue3-toastify'
+import { getJournalsList, getSuccessStoriesList } from '../services/api'
 
 const authStore = useAuthStore()
+
+const API_BASE = 'https://erp-ryss.ap.gov.in'
+function unique(values) { return [...new Set(values.filter(Boolean))] }
+function apiUrl(path) { return !path ? '' : path.startsWith('http') ? path : `${API_BASE}${path}` }
 
 const activeTab = ref('articles')
 const csCategoryIndex = ref(1) // 0=training(gated), 1=farmer, 2=webinars
@@ -44,33 +49,6 @@ const allArticles = [
     keywords: ['Income', 'Economics'],
     theme: 'Economics', year: '2026', journal: 'Agricultural Economics Bulletin',
     country: 'India', language: 'English', doctype: 'Conference Paper', date: 'January 2026', pdf: '#',
-  },
-]
-
-const allJournals = [
-  {
-    id: 1,
-    title: 'Natural Farming and Climate Resilience: Evidence from Andhra Pradesh',
-    published: 'Published in Agricultural Sustainability Journal',
-    author: 'APCNF Research Division', year: '2026',
-    volume: 'Vol 12, Issue 3', publisher: 'Elsevier',
-    language: 'English', peer: 'Yes', access: 'Subscription', pdf: '#',
-  },
-  {
-    id: 2,
-    title: 'Natural Farming and Climate Resilience: Evidence from Andhra Pradesh',
-    published: 'Published in Agricultural Sustainability Journal',
-    author: 'APCNF Research Division', year: '2025',
-    volume: 'Vol 11, Issue 4', publisher: 'Springer',
-    language: 'English', peer: 'Yes', access: 'Free', pdf: '#',
-  },
-  {
-    id: 3,
-    title: 'Natural Farming and Climate Resilience: Evidence from Andhra Pradesh',
-    published: 'Published in Agricultural Sustainability Journal',
-    author: 'APCNF Research Division', year: '2025',
-    volume: 'Vol 10, Issue 2', publisher: 'Taylor & Francis',
-    language: 'Telugu', peer: 'No', access: 'Subscription', pdf: '#',
   },
 ]
 
@@ -173,9 +151,160 @@ const caseStudyData = {
 // ───────────────────────── Filter State ─────────────────────────
 
 const raFilter = ref({ keyword: '', author: '', theme: '', year: '', journal: '', country: '', language: '', doctype: '' })
-const jrFilter = ref({ keyword: '', journal: '', year: '', volume: '', publisher: '', language: '', peer: '', access: '' })
 const nlFilter = ref({ keyword: '', issue: '', year: '', language: '' })
 const csFilter = ref({ keyword: '', theme: '', location: '', year: '', author: '', language: '' })
+
+// ───────────────────────── Journals (dynamic — get_journals_list) ─────────────────────────
+
+const JR_PAGE_SIZE = 3
+const JR_FETCH_PAGE_SIZE = 50
+const JR_MAX_FETCH_PAGES = 10
+
+const jrAllJournals = ref([])
+const jrLoading = ref(false)
+const jrLoaded = ref(false)
+const jrPage = ref(1)
+const jrFilters = ref({ keyword: '', journal: '', year: '', volume: '', publisher: '', language: '', access: '' })
+
+function jrFormatVolume(item) {
+  const parts = []
+  if (item.volume) parts.push(`Vol ${item.volume}`)
+  if (item.volume_issue) parts.push(`Issue ${item.volume_issue}`)
+  return parts.join(', ')
+}
+function jrViewLink(item) {
+  const raw = item.resource_link || (item.doi ? (/^https?:\/\//i.test(item.doi) ? item.doi : `https://doi.org/${item.doi}`) : '')
+  return raw ? (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`) : ''
+}
+function jrItemField(item, key) {
+  switch (key) {
+    case 'keyword': return [item.title, item.author, item.publisher].filter(Boolean).join(' ').toLowerCase()
+    case 'journal': return (item.publisher || '').toLowerCase()
+    case 'year': return String(item.publication_year || '').toLowerCase()
+    case 'volume': return jrFormatVolume(item).toLowerCase()
+    case 'publisher': return (item.publisher || '').toLowerCase()
+    case 'language': return (item.language || '').toLowerCase()
+    case 'access': return (item.open_access || '').toLowerCase()
+    default: return ''
+  }
+}
+
+async function fetchJournalsPage(page) {
+  try {
+    const result = await getJournalsList({ page, page_size: JR_FETCH_PAGE_SIZE })
+    return result?.message || {}
+  } catch { return {} }
+}
+
+async function loadAllJournals() {
+  jrLoading.value = true
+  try {
+    let items = [], page = 1, totalPages = 1
+    do {
+      const resp = await fetchJournalsPage(page)
+      items = items.concat(resp.data || [])
+      totalPages = resp.pagination?.total_pages || 1
+      page++
+    } while (page <= totalPages && page <= JR_MAX_FETCH_PAGES)
+    jrAllJournals.value = items
+  } finally { jrLoading.value = false; jrLoaded.value = true }
+}
+
+const jrYears = computed(() => unique(jrAllJournals.value.map(i => i.publication_year)).sort())
+const jrLanguages = computed(() => unique(jrAllJournals.value.map(i => i.language)).sort())
+const jrAccessOptions = computed(() => unique(jrAllJournals.value.map(i => i.open_access)).sort())
+
+const filteredJournals = computed(() => {
+  const filters = {}
+  Object.entries(jrFilters.value).forEach(([k, v]) => { if (v) filters[k] = String(v).toLowerCase() })
+  return jrAllJournals.value.filter(item => Object.keys(filters).every(key => jrItemField(item, key).includes(filters[key])))
+})
+const jrTotalPages = computed(() => Math.max(1, Math.ceil(filteredJournals.value.length / JR_PAGE_SIZE)))
+const pagedJournals = computed(() => {
+  const page = Math.min(jrPage.value, jrTotalPages.value)
+  return filteredJournals.value.slice((page - 1) * JR_PAGE_SIZE, page * JR_PAGE_SIZE)
+})
+
+function clearJrFilters() {
+  jrFilters.value = { keyword: '', journal: '', year: '', volume: '', publisher: '', language: '', access: '' }
+  jrPage.value = 1
+}
+function jrGoToPage(page) {
+  if (page < 1 || page > jrTotalPages.value) return
+  jrPage.value = page
+}
+watch(jrFilters, () => { jrPage.value = 1 }, { deep: true })
+
+// ───────────────────────── Success Stories (dynamic — success_stories_list) ─────────────────────────
+
+const SS_PAGE_SIZE = 6
+const DEFAULT_SS_THUMBNAIL = '/img/background-img/success-story.png'
+
+const ssFilters = ref({ keyword: '', theme: '', location: '', year: '', author: '', language: '' })
+const ssItems = ref([])
+const ssLoading = ref(false)
+const ssPage = ref(1)
+const ssTotalPages = ref(1)
+const ssTotalCount = ref(0)
+const ssYears = ref([])
+const ssLanguages = ref([])
+const ssThemes = ref([])
+let ssSearchTimer
+
+function ssExtractYear(val) {
+  if (!val) return ''
+  const m = String(val).match(/\d{4}/)
+  return m ? m[0] : ''
+}
+function ssThumbnail(item) { return item.thumbnail ? apiUrl(item.thumbnail) : DEFAULT_SS_THUMBNAIL }
+function ssLink(item) {
+  const raw = item.attachment ? apiUrl(item.attachment) : (item.resource_link || item.link || item.url || '')
+  return raw ? (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`) : ''
+}
+function ssYear(item) {
+  return item.year ? String(item.year) : ssExtractYear(item.date_of_creationpublication || item.date || item.publication_date || item.published_date)
+}
+
+async function loadSsMeta() {
+  try {
+    const result = await getSuccessStoriesList({ meta: 1 })
+    const data = result?.message || {}
+    ssYears.value = data.years || []
+    ssLanguages.value = data.languages || []
+    ssThemes.value = data.themes || []
+  } catch { ssYears.value = []; ssLanguages.value = []; ssThemes.value = [] }
+}
+
+async function loadStories(targetPage = 1) {
+  ssLoading.value = true
+  try {
+    const active = ssFilters.value
+    const params = { page: targetPage, page_size: SS_PAGE_SIZE }
+    if (active.keyword.trim()) params.search = active.keyword.trim()
+    if (active.year) params.year = active.year
+    if (active.author) params.author = active.author
+    if (active.theme) params.theme = active.theme
+    if (active.location) params.location = active.location
+    if (active.language) params.language = active.language
+    const result = await getSuccessStoriesList(params)
+    const data = result?.message || {}
+    ssItems.value = data.data || []
+    ssTotalCount.value = data.total_count || 0
+    ssTotalPages.value = data.total_pages || 1
+    ssPage.value = targetPage
+  } catch { ssItems.value = []; ssTotalCount.value = 0; ssTotalPages.value = 1 } finally { ssLoading.value = false }
+}
+
+function clearSsFilters() {
+  ssFilters.value = { keyword: '', theme: '', location: '', year: '', author: '', language: '' }
+  loadStories(1)
+}
+
+watch(ssFilters, () => {
+  if (activeTab.value !== 'successstories') return
+  clearTimeout(ssSearchTimer)
+  ssSearchTimer = setTimeout(() => loadStories(1), 350)
+}, { deep: true })
 
 // ───────────────────────── Client-side filtering ─────────────────────────
 
@@ -197,20 +326,6 @@ const filteredArticles = computed(() => {
     matchText(a.country, f.country) &&
     matchExact(a.language, f.language) &&
     matchExact(a.doctype, f.doctype)
-  )
-})
-
-const filteredJournals = computed(() => {
-  const f = jrFilter.value
-  return allJournals.filter(j =>
-    matchText(j.title + ' ' + j.published, f.keyword) &&
-    matchText(j.published, f.journal) &&
-    matchExact(j.year, f.year) &&
-    matchText(j.volume, f.volume) &&
-    matchText(j.publisher, f.publisher) &&
-    matchExact(j.language, f.language) &&
-    matchExact(j.peer, f.peer) &&
-    matchExact(j.access, f.access)
   )
 })
 
@@ -242,6 +357,8 @@ const currentCsItems = computed(() => {
 
 function switchTab(tab) {
   activeTab.value = tab
+  if (tab === 'journals' && !jrLoaded.value) loadAllJournals()
+  if (tab === 'successstories' && !ssItems.value.length) { loadSsMeta(); loadStories(1) }
 }
 
 function selectCsCategory(idx) {
@@ -257,17 +374,14 @@ function selectCsCategory(idx) {
 }
 
 function clearRa() { Object.keys(raFilter.value).forEach(k => raFilter.value[k] = '') }
-function clearJr() { Object.keys(jrFilter.value).forEach(k => jrFilter.value[k] = '') }
 function clearNl() { Object.keys(nlFilter.value).forEach(k => nlFilter.value[k] = '') }
 function clearCs() { Object.keys(csFilter.value).forEach(k => csFilter.value[k] = '') }
 
 // Unique year options derived from data
 const raYears = [...new Set(allArticles.map(a => a.year))].sort()
-const jrYears = [...new Set(allJournals.map(j => j.year))].sort()
 const nlYears = [...new Set(allNewsletters.map(n => n.year))].sort()
 const csYears = [...new Set(Object.values(caseStudyData).flat().map(c => c.year))].sort()
 const raLanguages = [...new Set(allArticles.map(a => a.language))].sort()
-const jrLanguages = [...new Set(allJournals.map(j => j.language))].sort()
 const nlLanguages = [...new Set(allNewsletters.map(n => n.language))].sort()
 const csLanguages = [...new Set(Object.values(caseStudyData).flat().map(c => c.language))].sort()
 </script>
@@ -300,7 +414,7 @@ const csLanguages = [...new Set(Object.values(caseStudyData).flat().map(c => c.l
               News Letters
             </button>
           </li>
-
+          
           <!-- Case Studies with hover dropdown -->
           <li class="nav-item hover-dropdown" @mouseenter="showCsDropdown = true" @mouseleave="showCsDropdown = false">
             <button class="nav-link" :class="{ active: activeTab === 'casestudies' }" @click="switchTab('casestudies')">
@@ -314,6 +428,11 @@ const csLanguages = [...new Set(Object.values(caseStudyData).flat().map(c => c.l
                 </a>
               </li>
             </ul>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" :class="{ active: activeTab === 'successstories' }" @click="switchTab('successstories')">
+              Success Stories
+            </button>
           </li>
         </ul>
 
@@ -396,7 +515,7 @@ const csLanguages = [...new Set(Object.values(caseStudyData).flat().map(c => c.l
             </div>
           </div>
 
-          <!-- ===== Journals ===== -->
+          <!-- ===== Journals (dynamic) ===== -->
           <div v-show="activeTab === 'journals'">
             <div class="row">
               <div class="col-lg-3 mt-2">
@@ -404,66 +523,150 @@ const csLanguages = [...new Set(Object.values(caseStudyData).flat().map(c => c.l
                   <div class="library-filter-title"><i class="bi bi-funnel-fill"></i> Filter Journals</div>
                   <form @submit.prevent>
                     <div class="row mb-3"><div class="col-sm-12">
-                      <input type="text" class="form-control" v-model="jrFilter.keyword" placeholder="Keyword(s)">
+                      <input type="text" class="form-control" v-model="jrFilters.keyword" placeholder="Keyword(s)">
                     </div></div>
                     <div class="row mb-3"><div class="col-sm-12">
-                      <input type="text" class="form-control" v-model="jrFilter.journal" placeholder="Journal Name">
+                      <input type="text" class="form-control" v-model="jrFilters.journal" placeholder="Journal Name">
                     </div></div>
                     <div class="row mb-3"><div class="col-sm-12">
-                      <select class="form-select" v-model="jrFilter.year">
+                      <select class="form-select" v-model="jrFilters.year">
                         <option value="">Publication Year</option>
-                        <option v-for="y in jrYears" :key="y">{{ y }}</option>
+                        <option v-for="y in jrYears" :key="y" :value="y">{{ y }}</option>
                       </select>
                     </div></div>
                     <div class="row mb-3"><div class="col-sm-12">
-                      <input type="text" class="form-control" v-model="jrFilter.volume" placeholder="Volume &amp; Issue">
+                      <input type="text" class="form-control" v-model="jrFilters.volume" placeholder="Volume &amp; Issue">
                     </div></div>
                     <div class="row mb-3"><div class="col-sm-12">
-                      <input type="text" class="form-control" v-model="jrFilter.publisher" placeholder="Publisher">
+                      <input type="text" class="form-control" v-model="jrFilters.publisher" placeholder="Publisher">
                     </div></div>
                     <div class="row mb-3"><div class="col-sm-12">
-                      <select class="form-select" v-model="jrFilter.language">
+                      <select class="form-select" v-model="jrFilters.language">
                         <option value="">Language</option>
-                        <option v-for="l in jrLanguages" :key="l">{{ l }}</option>
+                        <option v-for="l in jrLanguages" :key="l" :value="l">{{ l }}</option>
                       </select>
                     </div></div>
                     <div class="row mb-3"><div class="col-sm-12">
-                      <select class="form-select" v-model="jrFilter.peer">
-                        <option value="">Peer Reviewed</option>
-                        <option>Yes</option><option>No</option>
-                      </select>
-                    </div></div>
-                    <div class="row mb-3"><div class="col-sm-12">
-                      <select class="form-select" v-model="jrFilter.access">
+                      <select class="form-select" v-model="jrFilters.access">
                         <option value="">Open Access</option>
-                        <option>Free</option><option>Subscription</option>
+                        <option v-for="a in jrAccessOptions" :key="a" :value="a">{{ a }}</option>
                       </select>
                     </div></div>
                     <div>
-                      <button type="button" style="width: 100%;" class="btn btn-outline-secondary" @click="clearJr">Clear</button>
+                      <button type="button" style="width: 100%;" class="btn btn-outline-secondary" @click="clearJrFilters">Clear</button>
                     </div>
                   </form>
                 </div>
               </div>
 
               <div class="col-lg-9">
-                <div id="jr-results">
-                  <div v-for="item in filteredJournals" :key="item.id" class="journal-card">
-                    <div class="journal-icon">📑</div>
-                    <div class="journal-content">
-                      <h5>{{ item.title }}</h5>
-                      <p>{{ item.published }}</p>
-                      <small>Authors: {{ item.author }} | {{ item.year }}</small>
-                      <div class="mt-3">
-                        <a :href="item.pdf" target="_blank" class="btn btn-sm btn-success">View Publication</a>
+                <div v-if="jrLoading" class="py-5 text-center"><span class="spinner-border text-success"></span></div>
+                <template v-else>
+                  <div id="jr-results">
+                    <div v-for="item in pagedJournals" :key="item.name || item.title" class="journal-card">
+                      <div class="journal-icon">📑</div>
+                      <div class="journal-content">
+                        <h5>{{ item.title || item.sub_title || 'Untitled' }}</h5>
+                        <p>Published in {{ item.publisher || item.sub_title || 'N/A' }}</p>
+                        <small>Authors: {{ [item.author, item.publication_year].filter(Boolean).join(' | ') || 'N/A' }}</small>
+                        <div class="mt-3">
+                          <a v-if="jrViewLink(item)" :href="jrViewLink(item)" target="_blank" rel="noopener" class="btn btn-sm btn-success">View Publication</a>
+                          <button v-else class="btn btn-sm btn-success" disabled>View Publication</button>
+                        </div>
                       </div>
                     </div>
                   </div>
+                  <div v-if="filteredJournals.length === 0" class="no-results text-center py-4">
+                    <h5 class="mt-2">No journals match your filters</h5>
+                    <p class="text-muted">Try adjusting or clearing the filters above.</p>
+                  </div>
+                  <nav v-else class="d-flex justify-content-end align-items-center gap-3 mt-4">
+                    <button class="btn btn-outline-secondary" :disabled="jrPage <= 1" @click="jrGoToPage(jrPage - 1)">Previous</button>
+                    <span class="small text-muted">Page {{ jrPage }} of {{ jrTotalPages }}</span>
+                    <button class="btn btn-outline-secondary" :disabled="jrPage >= jrTotalPages" @click="jrGoToPage(jrPage + 1)">Next</button>
+                  </nav>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== Success Stories (dynamic) ===== -->
+          <div v-show="activeTab === 'successstories'">
+            <div class="row">
+              <div class="col-lg-3 mt-2">
+                <div class="library-filter-card">
+                  <div class="library-filter-title"><i class="bi bi-funnel-fill"></i> Filter Success Stories</div>
+                  <form @submit.prevent>
+                    <div class="row mb-3"><div class="col-sm-12">
+                      <input type="text" class="form-control" v-model="ssFilters.keyword" placeholder="Keywords">
+                    </div></div>
+                    <div class="row mb-3"><div class="col-sm-12">
+                      <select class="form-select" v-model="ssFilters.theme">
+                        <option value="">Theme</option>
+                        <option v-for="t in ssThemes" :key="t" :value="t">{{ t }}</option>
+                      </select>
+                    </div></div>
+                    <div class="row mb-3"><div class="col-sm-12">
+                      <input type="text" class="form-control" v-model="ssFilters.location" placeholder="Location (State/District)">
+                    </div></div>
+                    <div class="row mb-3"><div class="col-sm-12">
+                      <select class="form-select" v-model="ssFilters.year">
+                        <option value="">Year</option>
+                        <option v-for="y in ssYears" :key="y" :value="y">{{ y }}</option>
+                      </select>
+                    </div></div>
+                    <div class="row mb-3"><div class="col-sm-12">
+                      <input type="text" class="form-control" v-model="ssFilters.author" placeholder="Author / Documented By">
+                    </div></div>
+                    <div class="row mb-3"><div class="col-sm-12">
+                      <select class="form-select" v-model="ssFilters.language">
+                        <option value="">Language</option>
+                        <option v-for="l in ssLanguages" :key="l" :value="l">{{ l }}</option>
+                      </select>
+                    </div></div>
+                    <div>
+                      <button type="button" style="width: 100%;" class="btn btn-outline-secondary" @click="clearSsFilters">Clear</button>
+                    </div>
+                  </form>
                 </div>
-                <div v-if="filteredJournals.length === 0" class="no-results text-center py-4">
-                  <h5 class="mt-2">No journals match your filters</h5>
+              </div>
+
+              <div class="col-lg-9">
+                <div v-if="ssLoading" class="py-5 text-center"><span class="spinner-border text-success"></span></div>
+                <div v-else-if="!ssItems.length" class="no-results text-center py-4">
+                  <h5 class="mt-2">No stories found matching your filters</h5>
                   <p class="text-muted">Try adjusting or clearing the filters above.</p>
                 </div>
+                <template v-else>
+                  <div class="d-grid gap-3">
+                    <div v-for="item in ssItems" :key="item.name" class="ss-ebook-card">
+                      <a :href="ssLink(item) || '#'" :target="ssLink(item) ? '_blank' : undefined" rel="noopener" class="ss-thumb-wrap">
+                        <img :src="ssThumbnail(item)" :alt="item.title" class="ss-thumbnail" @error="$event.target.src = DEFAULT_SS_THUMBNAIL">
+                      </a>
+                      <div class="ss-info">
+                        <span class="ss-info-badge">{{ item.theme || 'Success Story' }}</span>
+                        <h5 class="ss-info-title">{{ item.title || 'Untitled' }}</h5>
+                        <div v-if="item.location" class="ss-info-location"><i class="bi bi-geo-alt-fill"></i> {{ item.location }}</div>
+                        <p class="ss-info-desc">{{ item.a_short_description_about_the_artifact || item.description || '' }}</p>
+                        <div class="ss-info-meta">
+                          <div v-if="ssYear(item)"><i class="bi bi-calendar3"></i> {{ ssYear(item) }}</div>
+                          <div v-if="item.author"><i class="bi bi-person-fill"></i> {{ item.author }}</div>
+                          <div v-if="item.language"><i class="bi bi-translate"></i> {{ item.language }}</div>
+                        </div>
+                        <div v-if="(item.tags || []).length" class="ss-tags-wrap"><span v-for="tag in item.tags" :key="tag" class="ss-tag-badge">{{ tag }}</span></div>
+                        <a v-if="ssLink(item)" :href="ssLink(item)" target="_blank" rel="noopener" class="ss-view-btn">View Story <i class="bi bi-arrow-right"></i></a>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="ssTotalPages > 1" class="d-flex align-items-center justify-content-between mt-4 flex-wrap gap-2">
+                    <small class="text-muted">Showing {{ (ssPage - 1) * SS_PAGE_SIZE + 1 }}–{{ Math.min(ssPage * SS_PAGE_SIZE, ssTotalCount) }} of {{ ssTotalCount }} records</small>
+                    <div class="d-flex align-items-center gap-2">
+                      <button class="btn btn-sm btn-outline-secondary" :disabled="ssPage <= 1" @click="loadStories(ssPage - 1)">&larr; Previous</button>
+                      <span class="small text-muted">Page {{ ssPage }} of {{ ssTotalPages }}</span>
+                      <button class="btn btn-sm btn-outline-secondary" :disabled="ssPage >= ssTotalPages" @click="loadStories(ssPage + 1)">Next &rarr;</button>
+                    </div>
+                  </div>
+                </template>
               </div>
             </div>
           </div>
@@ -688,5 +891,27 @@ const csLanguages = [...new Set(Object.values(caseStudyData).flat().map(c => c.l
   border-left: 4px solid #198754;
   padding-left: 12px;
   margin-bottom: 18px;
+}
+
+/* ── Success Story cards ─────────────────────────── */
+.ss-ebook-card { display: flex; flex-direction: row; align-items: flex-start; gap: 20px; padding: 20px; border: 1.5px solid #b7dcae; border-radius: 20px; background: #fff; overflow: hidden; transition: transform .3s, box-shadow .3s; }
+.ss-ebook-card:hover { transform: translateY(-6px); box-shadow: 0 12px 30px rgba(0, 0, 0, .1); }
+.ss-thumb-wrap { display: block; flex-shrink: 0; width: 140px; height: 190px; overflow: hidden; border-radius: 6px; background: #f4f6f7; box-shadow: 0 4px 14px rgba(0, 0, 0, .15); text-decoration: none; }
+.ss-thumbnail { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.ss-info { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+.ss-info-badge { width: fit-content; margin-bottom: 10px; padding: 4px 12px; border-radius: 20px; background: #eef8f0; color: #198754; font-size: 12px; font-weight: 600; }
+.ss-info-title { margin-bottom: 8px; color: #1a1a1a; font-size: 19px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ss-info-location { display: flex; align-items: center; gap: 5px; margin-bottom: 8px; color: #198754; font-size: 13px; }
+.ss-info-desc { flex-grow: 1; margin-bottom: 12px; color: #6c757d; font-size: 14px; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ss-info-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; color: #1a1a1a; font-size: 14px; }
+.ss-info-meta div { display: flex; align-items: center; gap: 8px; }
+.ss-info-meta i { color: #1a1a1a; font-size: 16px; }
+.ss-tags-wrap { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.ss-tag-badge { padding: 4px 12px; border: 1.5px solid #8fc07f; border-radius: 20px; background: #fff; color: #1a1a1a; font-size: 13px; font-weight: 500; }
+.ss-view-btn { display: inline-flex; align-items: center; gap: 5px; margin-top: auto; color: #198754; font-size: 13px; font-weight: 600; text-decoration: none; transition: gap .2s; }
+.ss-view-btn:hover { gap: 10px; }
+@media (max-width: 767.98px) {
+  .ss-ebook-card { flex-direction: column; }
+  .ss-thumb-wrap { margin: 0 auto 16px; }
 }
 </style>

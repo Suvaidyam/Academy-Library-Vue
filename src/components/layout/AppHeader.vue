@@ -2,13 +2,33 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
-import { getAnnouncementList } from '../../services/api'
+import { getAnnouncementList, getTodayTopics } from '../../services/api'
 
 const auth = useAuthStore()
 const router = useRouter()
-const mobileNavActive = ref(false)
-const announcements   = ref([])
-const openDropdown    = ref(null)
+const mobileNavActive  = ref(false)
+const announcements    = ref([])
+const openDropdown     = ref(null)
+const todayTopics      = ref([])
+const showTopicsPopup  = ref(false)
+const closingTopicsPopup = ref(false)
+const topicsUnseen     = ref(false)
+
+const TOPICS_TODAY_KEY = 'today_topics_popup_last_shown'
+
+function closeTopicsPopup() {
+  closingTopicsPopup.value = true
+  setTimeout(() => {
+    showTopicsPopup.value = false
+    closingTopicsPopup.value = false
+  }, 250)
+}
+
+function openTopicsPopup() {
+  showTopicsPopup.value = true
+  topicsUnseen.value = false
+  localStorage.setItem(TOPICS_TODAY_KEY, new Date().toISOString().slice(0, 10))
+}
 
 function getInitials(name) {
   if (!name) return '?'
@@ -41,6 +61,17 @@ onMounted(async () => {
   try {
     const data = await getAnnouncementList()
     announcements.value = data?.message || []
+  } catch {
+    // silently fail
+  }
+
+  try {
+    const data = await getTodayTopics()
+    todayTopics.value = data?.message?.topics?.map(t => t.topic) || []
+    if (todayTopics.value.length) {
+      const today = new Date().toISOString().slice(0, 10)
+      topicsUnseen.value = localStorage.getItem(TOPICS_TODAY_KEY) !== today
+    }
   } catch {
     // silently fail
   }
@@ -163,7 +194,7 @@ onMounted(async () => {
                   <ul class="dropdown" :class="{ 'mobile-open': openDropdown === 'resources' }">
                     <li><RouterLink class="dropdown-item" to="/library" @click="closeMobileNav">Library</RouterLink></li>
                     <li><RouterLink class="dropdown-item" to="/research-library" @click="closeMobileNav">Publications</RouterLink></li>
-                    <li><RouterLink class="dropdown-item" to="/success-stories" @click="closeMobileNav">Success Stories</RouterLink></li>
+                    <li><RouterLink class="dropdown-item" to="/global-library" @click="closeMobileNav">Global Resource</RouterLink></li>
                     <li><RouterLink class="dropdown-item" to="/reports" @click="closeMobileNav">Annual Reports</RouterLink></li>
                   </ul>
                 </li>
@@ -177,8 +208,40 @@ onMounted(async () => {
           </div>
         </div>
       </div>
+
     </div>
   </header>
+
+  <div
+    v-if="showTopicsPopup"
+    class="topics-popup-overlay"
+    :class="{ closing: closingTopicsPopup }"
+    @click.self="closeTopicsPopup"
+  >
+    <div class="topics-popup-box">
+      <button type="button" class="topics-popup-close" aria-label="Close" @click="closeTopicsPopup">&times;</button>
+      <div class="topics-popup-header"><i class="bi bi-megaphone-fill"></i> Today's Topics</div>
+      <div class="topics-popup-sub">Fresh from IGGAARl Academy</div>
+      <ul class="topics-popup-list">
+        <li v-for="(topic, i) in todayTopics" :key="i" :style="{ animationDelay: `${0.15 + i * 0.12}s` }">
+          {{ topic }}
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <button
+    v-if="todayTopics.length"
+    type="button"
+    class="topics-float-btn"
+    :class="{ 'has-indicator': topicsUnseen }"
+    title="Today's Topics"
+    aria-label="Show today's topics"
+    @click="openTopicsPopup"
+  >
+    <i class="bi bi-megaphone-fill"></i>
+    <span v-if="topicsUnseen" class="topics-float-dot"></span>
+  </button>
 </template>
 
 <style scoped>
@@ -215,5 +278,270 @@ onMounted(async () => {
   font-weight: 700;
   line-height: 1;
   flex-shrink: 0;
+}
+
+.topics-popup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 30, 20, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  opacity: 0;
+  animation: topicsFadeIn 0.3s ease forwards;
+}
+
+.topics-popup-overlay.closing {
+  animation: topicsFadeOut 0.25s ease forwards;
+}
+
+.topics-popup-box {
+  background: #fff;
+  border-radius: 14px;
+  width: 92%;
+  max-width: 440px;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 26px 24px;
+  box-shadow: 0 15px 50px rgba(0, 0, 0, 0.3);
+  position: relative;
+  opacity: 0;
+  transform: translateY(-24px) scale(0.96);
+  animation: topicsPopIn 0.4s 0.05s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.topics-popup-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  background: none;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  color: #9aa5a0;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.topics-popup-close:hover {
+  color: #198754;
+}
+
+.topics-popup-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 700;
+  color: #146c43;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
+}
+
+.topics-popup-sub {
+  font-size: 12.5px;
+  color: #7a8a82;
+  margin-bottom: 16px;
+}
+
+.topics-popup-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.topics-popup-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid #eef5f0;
+  font-size: 14.5px;
+  color: #1d3b2a;
+  line-height: 1.4;
+  opacity: 0;
+  transform: translateX(-16px);
+  animation: topicsItemIn 0.4s ease forwards;
+}
+
+.topics-popup-list li:last-child {
+  border-bottom: none;
+}
+
+.topics-popup-list li::before {
+  content: "\2022";
+  color: #198754;
+  font-weight: 700;
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+@keyframes topicsFadeIn {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes topicsFadeOut {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes topicsPopIn {
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes topicsItemIn {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.topics-float-btn {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #22a866, #146c43);
+  color: #fff;
+  border: none;
+  font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  z-index: 1900;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  animation: topicsFloatIn 0.4s ease;
+}
+
+.topics-float-btn.has-indicator {
+  animation: topicsFloatIn 0.4s ease, topicsFloatBounce 2.6s ease-in-out 1s infinite;
+}
+
+.topics-float-btn.has-indicator i {
+  animation: topicsBellRing 2.6s ease-in-out 1.2s infinite;
+}
+
+.topics-float-btn.has-indicator::before,
+.topics-float-btn.has-indicator::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #22a866;
+  z-index: -1;
+  animation: topicsPulseRing 2.6s ease-out infinite;
+}
+
+.topics-float-btn.has-indicator::after {
+  animation-delay: 0.9s;
+}
+
+.topics-float-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ff4757;
+  border: 2px solid #fff;
+  animation: topicsDotPulse 1.8s ease-out infinite;
+}
+
+.topics-float-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.topics-float-btn:hover,
+.topics-float-btn:hover i {
+  animation-play-state: paused;
+}
+
+@keyframes topicsDotPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(255, 71, 87, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 71, 87, 0);
+  }
+}
+
+@keyframes topicsFloatIn {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes topicsFloatBounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  10% {
+    transform: translateY(-6px);
+  }
+  20% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes topicsBellRing {
+  0%, 100% {
+    transform: rotate(0);
+  }
+  5% {
+    transform: rotate(-15deg);
+  }
+  10% {
+    transform: rotate(12deg);
+  }
+  15% {
+    transform: rotate(-8deg);
+  }
+  20% {
+    transform: rotate(0);
+  }
+}
+
+@keyframes topicsPulseRing {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+}
+
+@media (max-width: 576px) {
+  .topics-float-btn {
+    right: 14px;
+    bottom: 14px;
+    width: 48px;
+    height: 48px;
+    font-size: 20px;
+  }
 }
 </style>
